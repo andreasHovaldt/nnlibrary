@@ -5,6 +5,7 @@ import numpy as np
 import torch.nn as nn
 
 from torch import Tensor
+from pathlib import Path
 from torch.utils.data import Dataset
 
 
@@ -27,29 +28,34 @@ class MultiTaskLoss(nn.Module):
 
 
 class MpcDataset(Dataset):
-    def __init__(self, root_dir: os.PathLike, transform=None, device='cpu'):
+    def __init__(self, root_dir: os.PathLike, transform=None, target_transform=None):
         """
         Arguments:
             root_dir (PathLike): Directory with all the data.
             transform (callable, optional): Optional transform to be applied on a sample.
         """
-        self.root_dir = root_dir
+        self.root_dir = Path(root_dir)
+        self.dataset_length = len(list(self.root_dir.iterdir()))
         self.transform = transform
-        self.device = device
-        
-        data_dict: dict[str, np.ndarray] = np.load(self.root_dir, allow_pickle=True)
-        ahu_states_measurements, ahu_actuators_measurements, ahu_actuator_commands, ahu_mode_commands, _ = data_dict.values()
-        
-        self.mpc_input = np.concatenate([ahu_states_measurements, ahu_actuators_measurements], axis=1).astype(np.float32)
-        self.mpc_command_output = ahu_actuator_commands.astype(np.float32)
-        self.mpc_mode_output = ahu_mode_commands.astype(np.float32)
-        assert self.mpc_input.shape[0] == self.mpc_command_output.shape[0] == self.mpc_mode_output.shape[0] 
+        self.target_transform = target_transform
         
     def __len__(self):
-        return self.mpc_input.shape[0]
+        return self.dataset_length
     
-    def __getitem__(self, index) -> Tensor:
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
+        # Load data
+        data_dir = self.root_dir / f"{index:06d}"
+        x = np.load(data_dir / "input.npy")
+        y = np.load(data_dir / "output.npy")
         
+        # Apply transforms
+        if self.transform:
+            x = self.transform(x)
+        if self.target_transform:
+            y = self.target_transform(y)
+            
+        # Convert to tensors and transfer to correct device
+        x = torch.as_tensor(x, dtype=torch.float32)
+        y = torch.as_tensor(y, dtype=torch.float32)
         
-        
-        return torch.tensor([])
+        return x, y

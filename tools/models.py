@@ -40,10 +40,32 @@ class SimpleClassificationModel(nn.Module):
 
 
 
+# class HVACModeMLP(nn.Module):
+#     def __init__(self, in_dim: int, n_classes: int):
+#         super().__init__()
+#         self.net = nn.Sequential(
+#             nn.Linear(in_dim, 256),
+#             nn.ReLU(),
+#             nn.Dropout(0.2),
+#             nn.Linear(256, 128),
+#             nn.ReLU(),
+#             nn.Dropout(0.2),
+#             nn.Linear(128, 64),
+#             nn.ReLU(),
+#             nn.Linear(64, n_classes)
+#         )
+#     def forward(self, x):
+#         return self.net(x)
+    
 class HVACModeMLP(nn.Module):
-    def __init__(self, in_dim: int, n_classes: int):
+    def __init__(self, window_size: int, feature_dim: int, n_classes: int):
         super().__init__()
+        self.window_size = window_size
+        self.feature_dim = feature_dim
+        in_dim = window_size * feature_dim
+        
         self.net = nn.Sequential(
+            nn.Flatten(),  # Flattens all dims except batch
             nn.Linear(in_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.2),
@@ -54,5 +76,7 @@ class HVACModeMLP(nn.Module):
             nn.ReLU(),
             nn.Linear(64, n_classes)
         )
+    
     def forward(self, x):
+        # x shape: (batch_size, window, features)
         return self.net(x)
