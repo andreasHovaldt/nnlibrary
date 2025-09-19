@@ -21,7 +21,6 @@ class SimpleMultiTaskModel(nn.Module):
         return x_actuators, x_mode
     
 
-
 class SimpleClassificationModel(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(SimpleClassificationModel, self).__init__()
@@ -38,24 +37,6 @@ class SimpleClassificationModel(nn.Module):
         x = self.relu(self.layer2(x))
         return self.softmax(self.classification_head(x))
 
-
-
-# class HVACModeMLP(nn.Module):
-#     def __init__(self, in_dim: int, n_classes: int):
-#         super().__init__()
-#         self.net = nn.Sequential(
-#             nn.Linear(in_dim, 256),
-#             nn.ReLU(),
-#             nn.Dropout(0.2),
-#             nn.Linear(256, 128),
-#             nn.ReLU(),
-#             nn.Dropout(0.2),
-#             nn.Linear(128, 64),
-#             nn.ReLU(),
-#             nn.Linear(64, n_classes)
-#         )
-#     def forward(self, x):
-#         return self.net(x)
     
 class HVACModeMLP(nn.Module):
     def __init__(self, window_size: int, feature_dim: int, n_classes: int):
@@ -68,10 +49,10 @@ class HVACModeMLP(nn.Module):
             nn.Flatten(),  # Flattens all dims except batch
             nn.Linear(in_dim, 256),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.5),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.5),
             nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, n_classes)
