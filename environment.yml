@@ -17,3 +17,4 @@ dependencies:
       - tqdm
       - matplotlib
       - wandb
+      - h5py
