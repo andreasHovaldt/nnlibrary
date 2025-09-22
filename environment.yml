@@ -18,3 +18,5 @@ dependencies:
       - matplotlib
       - wandb
       - h5py
+      - seaborn
+      - scikit-learn
