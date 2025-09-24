@@ -16,6 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 
 import nnlibrary.models
 import nnlibrary.datasets
+import nnlibrary.utils.loss
 import nnlibrary.utils.comm as comm
 
 from .hooks import Hookbase
@@ -164,7 +165,7 @@ class Trainer(TrainerBase):
         with autocast(enabled=self.amp_enable, dtype=self.amp_dtype):
             # Forward pass
             self.optimizer.zero_grad()
-            y_pred = self.model(X_batch)
+            y_pred: torch.Tensor = self.model(X_batch)
             loss: torch.Tensor = self.loss_fn(y_pred, y_batch)
             
             # Backward pass
@@ -191,7 +192,7 @@ class Trainer(TrainerBase):
         """Build model from configuration.
     
         Args:
-            model_config (dict): Model configuration containing:
+            model_config (BaseConfig): Model configuration containing:
                 name (str): Model class name from './nnlibrary/models'
                 args (dict): Constructor arguments for the model
         
@@ -216,7 +217,7 @@ class Trainer(TrainerBase):
         """Build dataset from configuration.
     
         Args:
-            dataset_config (dict): Dataset configuration containing:
+            dataset_config (BaseConfig): Dataset configuration containing:
                 name (str): Dataset class name from './nnlibrary/datasets'
                 args (dict): Constructor arguments for the dataset
         
@@ -246,7 +247,7 @@ class Trainer(TrainerBase):
         """Build optimizer from configuration.
     
         Args:
-            optimizer_config (dict): Optimizer configuration containing:
+            optimizer_config (BaseConfig): Optimizer configuration containing:
                 name (str): Optimizer class name from torch.optim
                 args (dict): Constructor arguments for the optimizer
         
@@ -271,12 +272,12 @@ class Trainer(TrainerBase):
         """Build scheduler from configuration.
     
         Args:
-            scheduler (dict): Scheduler configuration containing:
+            scheduler (BaseConfig): Scheduler configuration containing:
                 name (str): Scheduler class name from torch.optim
                 args (dict): Constructor arguments for the scheduler
         
         Returns:
-            sycheduler: Configured scheduler instance
+            scheduler: Configured scheduler instance
             
         Raises:
             ValueError: If scheduler class doesn't exist
@@ -292,18 +293,16 @@ class Trainer(TrainerBase):
             raise ValueError(f"Scheduler '{scheduler_name}' not found in torch.optim.lr_scheduler")
 
     
-    # TODO: Make compatible with custom loss functions
-    #   - Could make it search for loss functions in utils/loss.py with fallback to torch.nn
     def build_loss_fn(self, loss_fn: BaseConfig) -> nn.Module:
         """Build loss function from configuration.
     
         Args:
-            loss_fn (dict): Loss function configuration containing:
-                name (str): Loss function class name from torch.optim
-                args (dict): Constructor arguments for the Loss function
+            loss_fn (BaseConfig): Loss function configuration containing:
+                name (str): Loss function class name from nnlibrary.utils.loss or torch.nn
+                args (dict): Constructor arguments for the loss function
         
         Returns:
-            sycheduler: Configured loss function instance
+            loss_fn: Configured loss function instance
             
         Raises:
             ValueError: If loss function class doesn't exist
@@ -311,18 +310,22 @@ class Trainer(TrainerBase):
         loss_fn_name = loss_fn.name
         loss_fn_args = loss_fn.args
         
-        # Get the loss_fn class from the torch.nn module
-        if hasattr(torch.nn, loss_fn_name):
+        # First try nnlibrary.utils.loss for custom loss functions
+        if hasattr(nnlibrary.utils.loss, loss_fn_name):
+            loss_fn_class = getattr(nnlibrary.utils.loss, loss_fn_name)
+            return loss_fn_class(**loss_fn_args)
+        
+        # Then fall back to trying torch.nn
+        elif hasattr(torch.nn, loss_fn_name):
             loss_fn_class = getattr(torch.nn, loss_fn_name)
             return loss_fn_class(**loss_fn_args)
         else:
-            raise ValueError(f"Loss function '{loss_fn_name}' not found in torch.nn")
+            raise ValueError(f"Loss function '{loss_fn_name}' not found")
         
 
     def build_tensorboard_writer(self) -> tensorboardX.SummaryWriter:
-        writer = tensorboardX.SummaryWriter(self.cfg.save_path)
-        
         raise NotImplementedError
+        writer = tensorboardX.SummaryWriter(self.cfg.save_path)
     
     def build_wandb_run(self) -> wandb.Run:
         raise NotImplementedError
