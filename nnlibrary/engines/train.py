@@ -24,6 +24,7 @@ import nnlibrary.utils.comm as comm
 from .hooks import Hookbase
 
 from nnlibrary.configs import BaseConfig, DataLoaderConfig
+import nnlibrary.configs.hvac_mode_classifier as cfg_example
 
 
 AMP_DTYPES = {
@@ -116,9 +117,9 @@ class TrainerBase:
                 self.wandb_run.finish()
     
 
-import nnlibrary.configs.hvac_mode_classifier as cfg_example
+
 class Trainer(TrainerBase):
-    def __init__(self, cfg: cfg_example) -> None:
+    def __init__(self, cfg: cfg_example) -> None: # type: ignore
         super().__init__()
         
         self.cfg = cfg
@@ -225,7 +226,7 @@ class Trainer(TrainerBase):
             # Store for logging purposes
             self.model_module = module_name
             
-            return model_class(**model_args)
+            return model_class(**model_args).to(device=self.device)
         else:
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
 
