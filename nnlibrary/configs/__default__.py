@@ -1,3 +1,4 @@
+import torch
 from nnlibrary.engines import hooks as h
 
 #############################################
@@ -9,7 +10,7 @@ validate_model = True # Whether to validate the model while training
 test_model = True # Whether to test the model post training
 
 lr = 1e-3
-device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 amp_enable = True
 amp_dtype = "float16"
 
