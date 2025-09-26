@@ -8,6 +8,7 @@ import datetime as dt
 
 from tqdm import tqdm
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -17,6 +18,7 @@ from torch.utils.data import Dataset, DataLoader
 import nnlibrary.models
 import nnlibrary.datasets
 import nnlibrary.utils.loss
+import nnlibrary.utils.schedulers
 import nnlibrary.utils.comm as comm
 
 from .hooks import Hookbase
@@ -33,27 +35,26 @@ AMP_DTYPES = {
 class TrainerBase:
     def __init__(self) -> None:
         
+        self.cfg: Any
         self.save_path: Path
         
         self.hooks: list[Hookbase]
         self.logger: logging.Logger
-        self.epochs: int
-        self.start_epoch: int
-        self.max_epoch: int
+        self.num_epochs: int
         
         self.amp_enable: bool
         self.amp_dtype: torch.dtype
         
         self.model: nn.Module
         self.trainloader: DataLoader
-        self.valloader: DataLoader
+        # self.valloader: DataLoader
         
         self.optimizer: optim.Optimizer
         self.scheduler: optim.lr_scheduler.LRScheduler
         self.loss_fn: nn.Module
         
-        self.tensorboard_writer: tensorboardX.SummaryWriter
-        self.wandb_run: wandb.Run # Basically the writer used for writing logs to wandb
+        self.tensorboard_writer: tensorboardX.SummaryWriter | None
+        self.wandb_run: wandb.Run | None # Basically the writer used for writing logs to wandb
         
         # Dict used for passing around various runtime information
         self.info = dict()
@@ -63,7 +64,7 @@ class TrainerBase:
         
         self.before_train()
         
-        for self.epoch in tqdm(range(self.start_epoch, self.max_epoch)):
+        for self.info["epoch"] in tqdm(range(self.num_epochs)):
             self.before_epoch()
             
             for self.info["epoch_iter"], self.info["iter_data"] in enumerate(self.trainloader):
@@ -108,8 +109,11 @@ class TrainerBase:
     
         # Shut off logging writers
         if comm.is_main_process():
-            self.tensorboard_writer.close()
-            self.wandb_run.finish()
+            if self.tensorboard_writer:
+                self.tensorboard_writer.flush()
+                self.tensorboard_writer.close()
+            if self.wandb_run: 
+                self.wandb_run.finish()
     
 
 import nnlibrary.configs.hvac_mode_classifier as cfg_example
@@ -118,15 +122,11 @@ class Trainer(TrainerBase):
         super().__init__()
         
         self.cfg = cfg
+        self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
                 
-        # Initialize hooks and pass self to them
-        self.hooks: list[Hookbase] = self.register_hooks()
-        
-            
+        self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
         self.logger: logging.Logger = logging.getLogger()
-        self.epochs: int = cfg.epochs
-        self.start_epoch: int = cfg.start_epoch
-        self.max_epoch: int = cfg.max_epoch
+        self.num_epochs: int = cfg.num_epochs
         # self.max_iter = 0 # <- it seems this only relates to calculating an ETA, so maybe the number of epochs * len(dataloader)? (Total batches to process during training)
         
         self.device: str = cfg.device
@@ -135,14 +135,14 @@ class Trainer(TrainerBase):
         
         self.model = self.build_model(cfg.model_config)
         self.trainloader = self.build_dataloader(cfg.dataset.train)
-        self.valloader = self.build_dataloader(cfg.dataset.val)
+        # self.valloader = self.build_dataloader(cfg.dataset.val)
         
         self.optimizer = self.build_optimizer(cfg.optimizer)
         self.scheduler = self.build_scheduler(cfg.scheduler)
         self.loss_fn = self.build_loss_fn(cfg.loss_fn)
         
-        # self.tensorboard_writer = self.build_tensorboard_writer()
-        # self.wandb_run = self.build_wandb_run()
+        self.tensorboard_writer = self.build_tensorboard_writer()
+        self.wandb_run = self.build_wandb_run()
         
         # Dict used for passing around various runtime information
         self.info = dict()
@@ -158,8 +158,10 @@ class Trainer(TrainerBase):
         X_batch, y_batch = self.info["iter_data"]
         
         # Move to correct torch device
-        if isinstance(X_batch, torch.Tensor): X_batch = X_batch.to(device=self.device, non_blocking=True)
-        if isinstance(y_batch, torch.Tensor): y_batch = y_batch.to(device=self.device, non_blocking=True)
+        if isinstance(X_batch, torch.Tensor): 
+            X_batch = X_batch.to(device=self.device, non_blocking=True)
+        if isinstance(y_batch, torch.Tensor): 
+            y_batch = y_batch.to(device=self.device, non_blocking=True)
             
         # Train model
         with autocast(enabled=self.amp_enable, dtype=self.amp_dtype):
@@ -177,10 +179,17 @@ class Trainer(TrainerBase):
             self.info["loss_iter"] = loss.item()
             self.info["loss_epoch_total"] += loss.item()
             
-            
     def before_epoch(self):
+        # Make sure the model is in training mode at the start of every epoch
+        # (important if any validation/eval toggled it previously)
+        if hasattr(self, "model") and isinstance(self.model, nn.Module):
+            self.model.train()
         self.info["loss_epoch_total"] = 0
         return super().before_epoch()
+    
+    def before_step(self):
+        self.info["current_lr"] = self.scheduler.get_last_lr()
+        return super().before_step()
     
     
     def after_epoch(self):
@@ -208,6 +217,14 @@ class Trainer(TrainerBase):
         # Get the model class from the models module
         if hasattr(nnlibrary.models, model_name):
             model_class = getattr(nnlibrary.models, model_name)
+            
+            # Extract module name for logging
+            module_path: str = model_class.__module__  # e.g., "nnlibrary.models.mlp"
+            module_name = module_path.split('.')[-1]  # "mlp"
+            
+            # Store for logging purposes
+            self.model_module = module_name
+            
             return model_class(**model_args)
         else:
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
@@ -283,14 +300,20 @@ class Trainer(TrainerBase):
             ValueError: If scheduler class doesn't exist
         """
         scheduler_name = scheduler.name
-        scheduler_args = scheduler.args
+        scheduler_args = scheduler.args.copy()  # Copy to avoid modifying original
         
-        # Get the scheduler class from the lr_scheduler module
-        if hasattr(optim.lr_scheduler, scheduler_name):
+        # Get the scheduler class from the nnlibrary.utils.schedulers module
+        if hasattr(nnlibrary.utils.schedulers, scheduler_name):
+            scheduler_class = getattr(nnlibrary.utils.schedulers, scheduler_name)
+            # Pass weak proxy to trainer to avoid circular references (same as hooks)
+            return scheduler_class(optimizer=self.optimizer, trainer=weakref.proxy(self), **scheduler_args)
+        
+        # Else get the scheduler class from the lr_scheduler module
+        elif hasattr(optim.lr_scheduler, scheduler_name):
             scheduler_class = getattr(optim.lr_scheduler, scheduler_name)
             return scheduler_class(optimizer=self.optimizer, **scheduler_args)
         else:
-            raise ValueError(f"Scheduler '{scheduler_name}' not found in torch.optim.lr_scheduler")
+            raise ValueError(f"Scheduler '{scheduler_name}' not found")
 
     
     def build_loss_fn(self, loss_fn: BaseConfig) -> nn.Module:
@@ -323,12 +346,45 @@ class Trainer(TrainerBase):
             raise ValueError(f"Loss function '{loss_fn_name}' not found")
         
 
-    def build_tensorboard_writer(self) -> tensorboardX.SummaryWriter:
-        raise NotImplementedError
-        writer = tensorboardX.SummaryWriter(self.cfg.save_path)
+    def build_tensorboard_writer(self) -> tensorboardX.SummaryWriter | None:
+        if self.cfg.enable_tensorboard and comm.is_main_process():
+            writer = tensorboardX.SummaryWriter(str(self.save_path))
+            self.logger.info(f"Tensorboard writer logging dir: {self.save_path}")
+            return writer
+        else:
+            return None
     
-    def build_wandb_run(self) -> wandb.Run:
-        raise NotImplementedError
+    def build_wandb_run(self) -> wandb.Run | None:
+        if self.cfg.enable_wandb and comm.is_main_process():
+            run = wandb.init(
+                entity=self.cfg.wandb_group_name,
+                project=self.cfg.wandb_project_name,
+                # name=f"{self.cfg.dataset_name}/{self.cfg.model_config.name}",
+                tags=[self.cfg.dataset_name, self.model_module, self.cfg.model_config.name],
+                group=self.cfg.dataset_name,
+                # sync_tensorboard=True, # TODO: Look into this
+                dir=self.save_path,
+                settings=wandb.Settings(api_key=self.cfg.wandb_key) if self.cfg.wandb_key else None,
+                
+                config = dict(
+                    dataset = self.cfg.dataset_name,
+                    architecture = self.model_module,
+                    model_name = self.cfg.model_config.name,
+                    
+                    epochs = self.cfg.num_epochs,
+                    learning_rate = self.cfg.lr,
+                    
+                    loss_fn = self.cfg.loss_fn.name, # TODO: Look into logging the args as well
+                    optimizer = self.cfg.optimizer.name,
+                    scheduler = self.cfg.scheduler.name,
+                )
+                
+            )
+            return run
+        else:
+            return None
+            
+            
     
     def register_hooks(self) -> list[Hookbase]:
         """
@@ -357,3 +413,27 @@ class Trainer(TrainerBase):
             hooks.append(hook_instance)
         
         return hooks
+    
+
+
+
+""" 
+What self.info contans and when it is accessible for potential hooks:
+
+# Before epoch
+self.info["epoch"] == The current epoch number
+
+# Before step
+self.info["epoch_iter"] == Current iteration within the current epoch (batch number)
+self.info["iter_data"] == Contains current batch data, X,y
+self.info["current_lr"] == Contains current learning rate
+
+# After step
+self.info["loss_iter"] == Loss of current batch
+self.info["loss_epoch_total"] == The summed loss for the current epoch, is only useful in after epoch
+
+# After epoch
+self.info["loss_epoch_avg"] == The average loss across all batches for the current epoch
+
+
+"""
