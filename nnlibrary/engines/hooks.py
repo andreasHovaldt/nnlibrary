@@ -1,9 +1,15 @@
+import os
+import shutil
 import datetime as dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+import wandb
+import torch
+from nnlibrary.engines.validation import Validator
+import nnlibrary.utils.comm as comm
 
 if TYPE_CHECKING:
-    from .train import TrainerBase
+    from .train import TrainerBase, Trainer
 
 
 class Hookbase:
@@ -16,7 +22,9 @@ class Hookbase:
     See http://engineering.hearsaysocial.com/2013/06/16/circular-references-in-python/
     """
     
-    trainer = None  # A weak reference to the trainer object.
+    # if TYPE_CHECKING:
+    #     trainer: TrainerBase | Trainer  # A weak reference to the trainer object.
+    trainer = None
     
     def before_train(self):
         pass
@@ -38,19 +46,170 @@ class Hookbase:
 
 
 class WandbHook(Hookbase):
+    def __init__(self) -> None:
+        self.current_iter = 0
+    
+    def before_train(self):
+        if self.trainer and self.trainer.wandb_run:
+            self.trainer.wandb_run.define_metric(name="params/*", step_metric="Iter")
+            self.trainer.wandb_run.define_metric(name="train_batch/*", step_metric="Iter")
+            self.trainer.wandb_run.define_metric(name="train/*", step_metric="Epoch")
+            
+            if self.trainer.cfg.validate_model:
+                self.trainer.wandb_run.define_metric(name="validation/*", step_metric="Epoch")
+            
+        
+    def before_step(self):
+        self.current_iter += 1
+    
     def after_step(self):
-        # Access trainer through weak proxy
-        if self.trainer:
-            loss = self.trainer.info["loss_iter"]
-            # Log to wandb
-        raise NotImplementedError
+        if self.trainer and self.trainer.wandb_run:
+            current_lr = self.trainer.info["current_lr"][0]
+            loss_iter = self.trainer.info["loss_iter"]
+            # print("after_step: ", self.current_iter, current_lr, loss_iter)
+            
+            self.trainer.wandb_run.log(
+                data={
+                    "Iter": self.current_iter,
+                    "params/lr": current_lr,
+                    "train_batch/loss": loss_iter,
+                },
+                #step=self.trainer.wandb_run.step,
+                step=self.current_iter,
+            )
+            
+    def after_epoch(self):
+        if self.trainer and self.trainer.wandb_run:
+            epoch = self.trainer.info["epoch"]
+            epoch_loss = self.trainer.info["loss_epoch_avg"]
+            # print("after_epoch: ", epoch, epoch_loss)
+            
+            self.trainer.wandb_run.log(
+                data={
+                    "Epoch": epoch+1,
+                    "train/loss": epoch_loss,
+                },
+                step=self.trainer.wandb_run.step,
+            )
+            
+            # Log validation metric is available
+            val_result: dict = self.trainer.info["validation_result"]
+            if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
+                for key, value in val_result.items():
+                    self.trainer.wandb_run.log(
+                        data={
+                            f"validation/{key}": value,
+                        },
+                        step=self.trainer.wandb_run.step,
+                    )
+                
+    
+    
+class TensorBoardHook(Hookbase):
+    def __init__(self) -> None:
+        self.current_iter = 0
+        
+    def before_step(self):
+        self.current_iter += 1
+    
+    def after_step(self):
+        if self.trainer and self.trainer.tensorboard_writer:
+            current_lr = self.trainer.info["current_lr"][0]
+            loss_iter = self.trainer.info["loss_iter"]
+            
+            self.trainer.tensorboard_writer.add_scalar("progress/Iter", self.current_iter, self.current_iter)
+            self.trainer.tensorboard_writer.add_scalar("params/lr", current_lr, self.current_iter)
+            self.trainer.tensorboard_writer.add_scalar("train_batch/loss", loss_iter, self.current_iter)
+            
+    def after_epoch(self):
+        if self.trainer and self.trainer.tensorboard_writer:
+            epoch = self.trainer.info["epoch"]
+            epoch_loss = self.trainer.info["loss_epoch_avg"]
+            
+            self.trainer.tensorboard_writer.add_scalar("progress/Epoch", epoch, self.current_iter)
+            # self.trainer.tensorboard_writer.add_scalar("progress/Epoch", epoch, self.current_iter)
+            self.trainer.tensorboard_writer.add_scalar("train/loss", epoch_loss, epoch)
+        
+
+class ValidationHook(Hookbase):
+    def __init__(self) -> None:
+        #if self.trainer and self.trainer.cfg.validate_model:
+        self.validator = None
+        #self.val_loss # FIXME: Add some list which contains all losses and accuracies and after_train() should save plots of these
+            
     
     def after_epoch(self):
-        # Access epoch loss from trainer
-        if self.trainer:
-            epoch_loss = self.trainer.info["loss_epoch_avg"]
-            # Log to wandb
-        raise NotImplementedError
+        
+        if self.trainer and self.trainer.cfg.validate_model:
+            
+            if self.validator is None:
+                validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
+                self.validator = Validator(
+                    validation_loader=validation_loader,
+                    loss_fn=self.trainer.loss_fn,
+                    device=self.trainer.device,
+                    amp_enable=self.trainer.amp_enable,
+                    amp_dtype=self.trainer.amp_dtype,
+                )
+        
+            result = self.validator.validate(
+                model=self.trainer.model
+            )
+            self.trainer.info["validation_result"] = result
+        return None
+            
+
+class CheckpointerHook(Hookbase):
+    def __init__(self) -> None:
+        # TODO: Somehow make the metric name choice better
+        self.metric_name: str = "val_accuracy"
+        self.best_metric_value: float = 0.0
+        
+        
+    def after_epoch(self):
+        if self.trainer is not None and comm.is_main_process():
+            save_dir = Path(self.trainer.save_path / "model")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save the last model
+            torch.save(
+                {
+                    "epoch": self.trainer.info["epoch"] + 1,
+                    "state_dict": self.trainer.model.state_dict(),
+                    "optimizer": self.trainer.optimizer.state_dict(),
+                    "scheduler": self.trainer.scheduler.state_dict(),
+                    
+                },
+                save_dir / "model_last.pth.tmp"
+            )
+            os.replace(save_dir / "model_last.pth.tmp", save_dir / "model_last.pth")
+            
+            
+            # Save a copy as best if validation improved
+            if self.trainer.cfg.validate_model:
+                metric_val = None
+                val_result = self.trainer.info.get("validation_result")
+                if isinstance(val_result, dict):
+                    metric_val = val_result.get(self.metric_name)
+                if metric_val is not None and metric_val > self.best_metric_value:
+                # Copy the last model if it was the best
+                    shutil.copyfile(
+                        save_dir / "model_last.pth",
+                        save_dir / "model_best.pth"
+                    )
+                    self.best_metric_value = metric_val
+            
+                
+        
+        
+        
+            
+            
+            
+            
+
+
+
 
 
 class SaveTrainingRun(Hookbase):
