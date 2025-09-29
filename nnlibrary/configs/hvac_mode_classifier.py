@@ -86,6 +86,14 @@ scheduler = BaseConfig( # 'optimizer' should not be passed in args
 ### Dataset Config ##########################
 #############################################
 dataset = SimpleNamespace()
+dataset.info = dict(
+    num_classes = 3,
+    class_names = [
+        "econ",
+        "cool",
+        "heat",
+    ]
+)
 dataset.train = DataLoaderConfig(
     dataset = BaseConfig(
         name = "MpcDatasetHDF5",

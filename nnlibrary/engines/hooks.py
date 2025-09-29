@@ -183,6 +183,7 @@ class TestHook(Hookbase):
                     device=self.trainer.device,
                     amp_enable=self.trainer.amp_enable,
                     amp_dtype=self.trainer.amp_dtype,
+                    detailed=True,
                 )
         
             result = self.tester.eval(
@@ -191,8 +192,59 @@ class TestHook(Hookbase):
             self.trainer.info["test_result"] = result
             
             print(f"Final test result:")
-            for key, value in result.items():
-                print(f"   {key}:{value:.4f}")
+            print(f"   loss: {result['loss']:.4f}")
+            print(f"   accuracy: {result['accuracy']:.2f}%")
+            
+            # Build confusion matrix and per-class stats from raw predictions if present
+            if all(k in result for k in ["y_true", "y_pred"]):
+                import numpy as np
+                from sklearn.metrics import confusion_matrix
+
+                # Inputs and class metadata (always provided by cfg.dataset)
+                y_true = np.array(result["y_true"], dtype=int)
+                y_pred = np.array(result["y_pred"], dtype=int)
+                dataset_info = self.trainer.cfg.dataset.info  # expected to be a dict-like with required keys
+                num_classes = int(dataset_info["num_classes"])
+                class_names = list(dataset_info["class_names"])
+
+                labels = list(range(num_classes))
+                cm = confusion_matrix(y_true.tolist(), y_pred.tolist(), labels=labels)
+
+                # Per-class accuracies
+                per_class_acc = []
+                class_total = []
+                class_correct = []
+                for i in range(cm.shape[0]):
+                    total = int(cm[i, :].sum())
+                    correct = int(cm[i, i])
+                    acc = 100.0 * correct / total if total > 0 else 0.0
+                    per_class_acc.append(acc)
+                    class_total.append(total)
+                    class_correct.append(correct)
+                print("\nPer-class accuracies:")
+                for i, (acc, total, correct) in enumerate(zip(per_class_acc, class_total, class_correct)):
+                    if total > 0:
+                        label = class_names[i]
+                        print(f"  {label}: {acc:.2f}% ({correct}/{total})")
+
+                # Save confusion matrix image
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+                with np.errstate(invalid='ignore', divide='ignore'):
+                    cm_norm = (cm.astype(float) / cm.sum(axis=1, keepdims=True)) * 100.0
+                    cm_norm = np.nan_to_num(cm_norm)
+                fig = plt.figure(figsize=(8, 6))
+                sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues',
+                            xticklabels=class_names, yticklabels=class_names)
+                plt.xlabel('Predicted')
+                plt.ylabel('True')
+                plt.title('Confusion Matrix (Test split, Row-normalized, %)')
+                figure_dir = Path(self.trainer.save_path) / "figures"
+                figure_dir.mkdir(parents=True, exist_ok=True)
+                figure_path = figure_dir / 'test_confusion_matrix.png'
+                plt.savefig(figure_path)
+                plt.close(fig)
+                print(f"Saved confusion matrix to: {figure_path}")
                 
                 
         return None
@@ -201,7 +253,7 @@ class TestHook(Hookbase):
 class CheckpointerHook(Hookbase):
     def __init__(self) -> None:
         # TODO: Somehow make the metric name choice better
-        self.metric_name: str = "val_accuracy"
+        self.metric_name: str = "accuracy"
         self.best_metric_value: float = 0.0
         
         

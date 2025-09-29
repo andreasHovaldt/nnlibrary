@@ -41,6 +41,7 @@ class Evaluator(EvaluatorBase):
         device: str,
         amp_enable: bool,
         amp_dtype: torch.dtype,
+        detailed: bool = False,
         
     ) -> None:
         super().__init__()
@@ -50,6 +51,7 @@ class Evaluator(EvaluatorBase):
         self.device = device
         self.amp_enable = amp_enable
         self.amp_dtype = amp_dtype
+        self.detailed = detailed
         
     
     def run_evaluation(self, model: nn.Module):
@@ -59,6 +61,9 @@ class Evaluator(EvaluatorBase):
         loss_eval_batch = 0.0
         eval_correct = 0
         eval_total = 0
+        
+        y_true: list[int] = []
+        y_pred: list[int] = []
         
         with torch.no_grad():
             for batch_x, batch_y in self.dataloader:
@@ -94,6 +99,11 @@ class Evaluator(EvaluatorBase):
                 # Count the amount of correct predictions
                 eval_correct += (predicted == target).sum().item()
                 
+                # Detailed stats: collect true/pred labels for confusion matrix
+                if self.detailed:
+                    y_true.extend(target.view(-1).tolist())
+                    y_pred.extend(predicted.view(-1).tolist())
+
                 # Add the current batch loss
                 loss_eval_batch += pred_loss.item()
         
@@ -104,7 +114,16 @@ class Evaluator(EvaluatorBase):
         # TODO: Add this to logging
         # print(f"Validation - Loss: {avg_val_loss:.4f}, Accuracy: {val_accuracy:.2f}%")
         
-        return dict(
+        result: dict = dict(
             loss = loss,
             accuracy = accuracy,
         )
+        
+        if self.detailed and len(y_true) > 0:
+            # Defer heavy computations (confusion matrix, per-class stats) to the caller.
+            result.update({
+                "y_true": y_true,
+                "y_pred": y_pred,
+            })
+        
+        return result
