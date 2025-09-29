@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 import wandb
 import torch
-from nnlibrary.engines.validation import Validator
+from nnlibrary.engines.eval import Evaluator
 import nnlibrary.utils.comm as comm
 
 if TYPE_CHECKING:
@@ -92,16 +92,17 @@ class WandbHook(Hookbase):
                 step=self.trainer.wandb_run.step,
             )
             
-            # Log validation metric is available
-            val_result: dict = self.trainer.info["validation_result"]
-            if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
-                for key, value in val_result.items():
-                    self.trainer.wandb_run.log(
-                        data={
-                            f"validation/{key}": value,
-                        },
-                        step=self.trainer.wandb_run.step,
-                    )
+            # Log validation metric if available
+            if "validation_result" in self.trainer.info.keys():
+                val_result: dict = self.trainer.info["validation_result"]
+                if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
+                    for key, value in val_result.items():
+                        self.trainer.wandb_run.log(
+                            data={
+                                f"validation/{key}": value,
+                            },
+                            step=self.trainer.wandb_run.step,
+                        )
                 
     
     
@@ -127,15 +128,21 @@ class TensorBoardHook(Hookbase):
             epoch_loss = self.trainer.info["loss_epoch_avg"]
             
             self.trainer.tensorboard_writer.add_scalar("progress/Epoch", epoch, self.current_iter)
-            # self.trainer.tensorboard_writer.add_scalar("progress/Epoch", epoch, self.current_iter)
             self.trainer.tensorboard_writer.add_scalar("train/loss", epoch_loss, epoch)
+            
+            # Log validation metric if available
+            if "validation_result" in self.trainer.info.keys():
+                val_result: dict = self.trainer.info["validation_result"]
+                if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
+                    for key, value in val_result.items():
+                        self.trainer.tensorboard_writer.add_scalar(f"validation/{key}", value, epoch)
         
 
 class ValidationHook(Hookbase):
     def __init__(self) -> None:
         #if self.trainer and self.trainer.cfg.validate_model:
         self.validator = None
-        #self.val_loss # FIXME: Add some list which contains all losses and accuracies and after_train() should save plots of these
+        #self.val_loss # FIXME: Add some list which contains all losses and accuracies then after_train() should save plots of these
             
     
     def after_epoch(self):
@@ -144,20 +151,52 @@ class ValidationHook(Hookbase):
             
             if self.validator is None:
                 validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
-                self.validator = Validator(
-                    validation_loader=validation_loader,
+                self.validator = Evaluator(
+                    dataloader=validation_loader,
                     loss_fn=self.trainer.loss_fn,
                     device=self.trainer.device,
                     amp_enable=self.trainer.amp_enable,
                     amp_dtype=self.trainer.amp_dtype,
                 )
         
-            result = self.validator.validate(
+            result = self.validator.eval(
                 model=self.trainer.model
             )
             self.trainer.info["validation_result"] = result
         return None
+
+
+class TestHook(Hookbase):
+    def __init__(self) -> None:
+        self.tester = None
             
+    
+    def after_train(self):
+        
+        if self.trainer and self.trainer.cfg.test_model:
+            
+            if self.tester is None:
+                test_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.test)
+                self.tester = Evaluator(
+                    dataloader=test_loader,
+                    loss_fn=self.trainer.loss_fn,
+                    device=self.trainer.device,
+                    amp_enable=self.trainer.amp_enable,
+                    amp_dtype=self.trainer.amp_dtype,
+                )
+        
+            result = self.tester.eval(
+                model=self.trainer.model
+            )
+            self.trainer.info["test_result"] = result
+            
+            print(f"Final test result:")
+            for key, value in result.items():
+                print(f"   {key}:{value:.4f}")
+                
+                
+        return None
+  
 
 class CheckpointerHook(Hookbase):
     def __init__(self) -> None:
@@ -199,17 +238,6 @@ class CheckpointerHook(Hookbase):
                     )
                     self.best_metric_value = metric_val
             
-                
-        
-        
-        
-            
-            
-            
-            
-
-
-
 
 
 class SaveTrainingRun(Hookbase):
@@ -224,21 +252,3 @@ class SaveTrainingRun(Hookbase):
             # TODO: save shiez
             
         raise NotImplementedError
-
-
-class TestHook(Hookbase):
-    def before_train(self):
-        print("Test hook - Before train")
-    
-    def before_epoch(self):
-        print("Test hook - Before epoch")
-    
-    def after_epoch(self):
-        print("Test hook - After epoch")
-        
-        if self.trainer:
-            epoch_loss = self.trainer.info["loss_epoch_avg"]
-            print(epoch_loss)
-    
-    def after_train(self):
-        print("Test hook - After train")
