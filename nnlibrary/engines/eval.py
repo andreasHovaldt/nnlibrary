@@ -8,35 +8,35 @@ import nnlibrary.utils.comm as comm
 
 
 
-class ValidatorBase:
+class EvaluatorBase:
     def __init__(self) -> None:
-        self.valloader: DataLoader
+        self.dataloader: DataLoader
     
-    def validate(self, model: nn.Module) -> dict:
+    def eval(self, model: nn.Module) -> dict:
         model.eval()
-        self.before_validation()
-        result = self.run_validation(model=model)
-        self.after_validation()
+        self.before_evaluation()
+        result = self.run_evaluation(model=model)
+        self.after_evaluation()
         model.train()
         return result
         
     
-    def before_validation(self):
+    def before_evaluation(self):
         pass
     
-    def run_validation(self, model: nn.Module) -> dict:
+    def run_evaluation(self, model: nn.Module) -> dict:
         raise NotImplementedError
     
-    def after_validation(self):
+    def after_evaluation(self):
         # Sync GPUs
         comm.synchronize()
     
     
     
-class Validator(ValidatorBase):
+class Evaluator(EvaluatorBase):
     def __init__(
         self, 
-        validation_loader: DataLoader,
+        dataloader: DataLoader,
         loss_fn: nn.Module,
         device: str,
         amp_enable: bool,
@@ -45,23 +45,23 @@ class Validator(ValidatorBase):
     ) -> None:
         super().__init__()
     
-        self.valloader = validation_loader # self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
+        self.dataloader = dataloader # self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
         self.loss_fn = loss_fn
         self.device = device
         self.amp_enable = amp_enable
         self.amp_dtype = amp_dtype
         
     
-    def run_validation(self, model: nn.Module):
-        # Use AMP autocast for validation (same as training)
+    def run_evaluation(self, model: nn.Module):
+        # Use AMP autocast for evaluation (same as training)
         autocast = functools.partial(torch.autocast, device_type=self.device)
         
-        loss_val_batch = 0.0
-        val_correct = 0
-        val_total = 0
+        loss_eval_batch = 0.0
+        eval_correct = 0
+        eval_total = 0
         
         with torch.no_grad():
-            for batch_x, batch_y in self.valloader:
+            for batch_x, batch_y in self.dataloader:
                 
                 # TODO: Add better logging
                 
@@ -74,7 +74,7 @@ class Validator(ValidatorBase):
                 # Forward pass with AMP
                 with autocast(enabled=self.amp_enable, dtype=self.amp_dtype):
                     pred_y: torch.Tensor = model(batch_x)
-                    loss: torch.Tensor = self.loss_fn(pred_y, batch_y)
+                    pred_loss: torch.Tensor = self.loss_fn(pred_y, batch_y)
                 
                 
                 # TODO: Accuracy might need to be more modular depending on the task
@@ -89,22 +89,22 @@ class Validator(ValidatorBase):
                 predicted = pred_y.argmax(dim=-1)
                 
                 # Add the batch size to the total validation samples
-                val_total += target.size(0)
+                eval_total += target.size(0)
                 
                 # Count the amount of correct predictions
-                val_correct += (predicted == target).sum().item()
+                eval_correct += (predicted == target).sum().item()
                 
                 # Add the current batch loss
-                loss_val_batch += loss.item()
+                loss_eval_batch += pred_loss.item()
         
         # Calculate metrics
-        loss_val = loss_val_batch / len(self.valloader)
-        val_accuracy = 100 * val_correct / val_total
+        loss = loss_eval_batch / len(self.dataloader)
+        accuracy = 100 * eval_correct / eval_total
         
         # TODO: Add this to logging
         # print(f"Validation - Loss: {avg_val_loss:.4f}, Accuracy: {val_accuracy:.2f}%")
         
         return dict(
-            loss_val = loss_val,
-            val_accuracy = val_accuracy,
+            loss = loss,
+            accuracy = accuracy,
         )

@@ -14,14 +14,15 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 amp_enable = True
 amp_dtype = "float16"
 
-enable_tensorboard = False
+enable_tensorboard = True
 enable_wandb = True
 wandb_group_name = None
 wandb_project_name = "nnlibrary"
 wandb_key = None
 
 hooks = [
-    h.ValidationHook,
+    h.ValidationHook, # <--- Needs to be before wandb and tensorboard hooks in the list
+    h.TestHook,
     h.WandbHook,
     h.TensorBoardHook,
     h.CheckpointerHook,
