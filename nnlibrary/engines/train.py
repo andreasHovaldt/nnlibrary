@@ -349,8 +349,8 @@ class Trainer(TrainerBase):
 
     def build_tensorboard_writer(self) -> tensorboardX.SummaryWriter | None:
         if self.cfg.enable_tensorboard and comm.is_main_process():
-            writer = tensorboardX.SummaryWriter(str(self.save_path))
-            self.logger.info(f"Tensorboard writer logging dir: {self.save_path}")
+            writer = tensorboardX.SummaryWriter(str(self.save_path / "tensorboard"))
+            self.logger.info(f"Tensorboard writer logging dir: {self.save_path / "tensorboard"}")
             return writer
         else:
             return None
@@ -435,6 +435,9 @@ self.info["loss_epoch_total"] == The summed loss for the current epoch, is only 
 
 # After epoch
 self.info["loss_epoch_avg"] == The average loss across all batches for the current epoch
+self.info["validation_result"] == The result of the validation run
 
+# After train
+self.info["test_result"] == The result of the test run
 
 """
