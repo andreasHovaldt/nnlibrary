@@ -97,12 +97,54 @@ class WandbHook(Hookbase):
                 val_result: dict = self.trainer.info["validation_result"]
                 if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
                     for key, value in val_result.items():
-                        self.trainer.wandb_run.log(
-                            data={
-                                f"validation/{key}": value,
-                            },
-                            step=self.trainer.wandb_run.step,
-                        )
+                        
+                        # Specific logging cases
+                        if key == "confusion_matrix":
+                            fig, ax = value
+                            self.trainer.wandb_run.log(
+                                data={
+                                    f"validation/{key}": wandb.Image(fig)
+                                },
+                                step=self.trainer.wandb_run.step,
+                            )
+                        
+                        # Dump the remaining test metrics
+                        else:
+                            self.trainer.wandb_run.log(
+                                data={
+                                    f"validation/{key}": value,
+                                },
+                                step=self.trainer.wandb_run.step,
+                            )
+    
+    def after_train(self):
+        if self.trainer and self.trainer.wandb_run:
+            
+            # Logging test results
+            
+            if "test_result" in self.trainer.info.keys():
+                test_result: dict = self.trainer.info["test_result"]
+                if isinstance(test_result, dict):
+                    
+                    for key, value in test_result.items():
+                        
+                        # Specific logging cases
+                        if key == "confusion_matrix":
+                            fig, ax = value
+                            self.trainer.wandb_run.log(
+                                data={
+                                    f"test/{key}": wandb.Image(fig)
+                                }
+                            )
+                        
+                        # Dump the remaining test metrics
+                        else:
+                            self.trainer.wandb_run.log(
+                                data={
+                                    f"test/{key}": value,
+                                },
+                                step=self.trainer.wandb_run.step,
+                            )
                 
     
     
@@ -140,9 +182,7 @@ class TensorBoardHook(Hookbase):
 
 class ValidationHook(Hookbase):
     def __init__(self) -> None:
-        #if self.trainer and self.trainer.cfg.validate_model:
         self.validator = None
-        #self.val_loss # FIXME: Add some list which contains all losses and accuracies then after_train() should save plots of these
             
     
     def after_epoch(self):
@@ -157,6 +197,8 @@ class ValidationHook(Hookbase):
                     device=self.trainer.device,
                     amp_enable=self.trainer.amp_enable,
                     amp_dtype=self.trainer.amp_dtype,
+                    class_names=self.trainer.cfg.dataset.info["class_names"],
+                    detailed=self.trainer.cfg.validation_confusion_matrix,
                 )
         
             result = self.validator.eval(
@@ -183,6 +225,7 @@ class TestHook(Hookbase):
                     device=self.trainer.device,
                     amp_enable=self.trainer.amp_enable,
                     amp_dtype=self.trainer.amp_dtype,
+                    class_names=self.trainer.cfg.dataset.info["class_names"],
                     detailed=True,
                 )
         
@@ -192,68 +235,29 @@ class TestHook(Hookbase):
             self.trainer.info["test_result"] = result
             
             print(f"Final test result:")
-            print(f"   loss: {result['loss']:.4f}")
-            print(f"   accuracy: {result['accuracy']:.2f}%")
+            for key, value in result.items():
+                if key == "confusion_matrix": continue
+                print(f"   {key}: {value:.4f}")
             
-            # Build confusion matrix and per-class stats from raw predictions if present
-            if all(k in result for k in ["y_true", "y_pred"]):
-                import numpy as np
-                from sklearn.metrics import confusion_matrix
-
-                # Inputs and class metadata (always provided by cfg.dataset)
-                y_true = np.array(result["y_true"], dtype=int)
-                y_pred = np.array(result["y_pred"], dtype=int)
-                dataset_info = self.trainer.cfg.dataset.info  # expected to be a dict-like with required keys
-                num_classes = int(dataset_info["num_classes"])
-                class_names = list(dataset_info["class_names"])
-
-                labels = list(range(num_classes))
-                cm = confusion_matrix(y_true.tolist(), y_pred.tolist(), labels=labels)
-
-                # Per-class accuracies
-                per_class_acc = []
-                class_total = []
-                class_correct = []
-                for i in range(cm.shape[0]):
-                    total = int(cm[i, :].sum())
-                    correct = int(cm[i, i])
-                    acc = 100.0 * correct / total if total > 0 else 0.0
-                    per_class_acc.append(acc)
-                    class_total.append(total)
-                    class_correct.append(correct)
-                print("\nPer-class accuracies:")
-                for i, (acc, total, correct) in enumerate(zip(per_class_acc, class_total, class_correct)):
-                    if total > 0:
-                        label = class_names[i]
-                        print(f"  {label}: {acc:.2f}% ({correct}/{total})")
-
-                # Save confusion matrix image
+            if "confusion_matrix" in result:
                 import matplotlib.pyplot as plt
-                import seaborn as sns
-                with np.errstate(invalid='ignore', divide='ignore'):
-                    cm_norm = (cm.astype(float) / cm.sum(axis=1, keepdims=True)) * 100.0
-                    cm_norm = np.nan_to_num(cm_norm)
-                fig = plt.figure(figsize=(8, 6))
-                sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues',
-                            xticklabels=class_names, yticklabels=class_names)
-                plt.xlabel('Predicted')
-                plt.ylabel('True')
-                plt.title('Confusion Matrix (Test split, Row-normalized, %)')
-                figure_dir = Path(self.trainer.save_path) / "figures"
-                figure_dir.mkdir(parents=True, exist_ok=True)
-                figure_path = figure_dir / 'test_confusion_matrix.png'
-                plt.savefig(figure_path)
-                plt.close(fig)
-                print(f"Saved confusion matrix to: {figure_path}")
+                from matplotlib.figure import Figure
+                from matplotlib.axes import Axes
                 
+                fig, ax = result["confusion_matrix"]
+                fig: Figure
+                ax: Axes
+                
+                figure_dir = Path(self.trainer.save_path / "figures")
+                figure_dir.mkdir(parents=True, exist_ok=True)
+                
+                fig.savefig(figure_dir / "confusion_matrix_test_split.png")
                 
         return None
   
 
 class CheckpointerHook(Hookbase):
     def __init__(self) -> None:
-        # TODO: Somehow make the metric name choice better
-        self.metric_name: str = "accuracy"
         self.best_metric_value: float = 0.0
         
         
@@ -281,12 +285,12 @@ class CheckpointerHook(Hookbase):
                 metric_val = None
                 val_result = self.trainer.info.get("validation_result")
                 if isinstance(val_result, dict):
-                    metric_val = val_result.get(self.metric_name)
+                    metric_val = val_result.get(self.trainer.cfg.validation_metric_name)
                 if metric_val is not None and metric_val > self.best_metric_value:
-                # Copy the last model if it was the best
+                    # Copy the last model if it was the best
                     shutil.copyfile(
                         save_dir / "model_last.pth",
-                        save_dir / "model_best.pth"
+                        save_dir / "model_best.pth",
                     )
                     self.best_metric_value = metric_val
             

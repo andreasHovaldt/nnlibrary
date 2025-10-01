@@ -6,7 +6,11 @@ from nnlibrary.engines import hooks as h
 #############################################
 
 save_path = "exp/"
+
 validate_model = True # Whether to validate the model while training
+validation_metric_name = "loss" # The metric used to determine the best model
+validation_confusion_matrix = True # Whether to create a confusion matrix based on the validation each epoch (Only available on wandb)
+
 test_model = True # Whether to test the model post training
 
 lr = 1e-3
