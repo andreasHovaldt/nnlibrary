@@ -177,6 +177,7 @@ class TensorBoardHook(Hookbase):
                 val_result: dict = self.trainer.info["validation_result"]
                 if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
                     for key, value in val_result.items():
+                        if key == "confusion_matrix": continue
                         self.trainer.tensorboard_writer.add_scalar(f"validation/{key}", value, epoch)
         
 
