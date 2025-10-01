@@ -52,8 +52,11 @@ model_config = BaseConfig(
 ### Loss function Config ####################
 #############################################
 loss_fn = BaseConfig(
-    name = "CrossEntropyLoss",
-    args=dict(),
+    name="FocalLoss",
+    args=dict(
+        alpha = [0.27, 0.46, 2.28],
+        gamma = 2.0,
+    )
 )
 
 

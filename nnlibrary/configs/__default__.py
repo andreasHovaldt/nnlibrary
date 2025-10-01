@@ -9,7 +9,7 @@ save_path = "exp/"
 
 validate_model = True # Whether to validate the model while training
 validation_metric_name = "loss" # The metric used to determine the best model
-validation_confusion_matrix = True # Whether to create a confusion matrix based on the validation each epoch (Only available on wandb)
+validation_confusion_matrix = False # Whether to create a confusion matrix based on the validation each epoch (Only available on wandb)
 
 test_model = True # Whether to test the model post training
 
@@ -26,7 +26,7 @@ wandb_key = None
 
 hooks = [
     h.ValidationHook, # <--- Needs to be before wandb and tensorboard hooks in the list
-    h.TestHook,
+    h.TestHook,       # <----/
     h.WandbHook,
     h.TensorBoardHook,
     h.CheckpointerHook,
