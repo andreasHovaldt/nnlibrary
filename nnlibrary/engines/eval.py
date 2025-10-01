@@ -113,11 +113,21 @@ class Evaluator(EvaluatorBase):
         # Use AMP autocast for evaluation (same as training)
         autocast = functools.partial(torch.autocast, device_type=self.device)
         
+        # Ensure model is on the correct device before evaluation
+        if isinstance(model, nn.Module):
+            try:
+                param_device_type = next(model.parameters()).device.type
+            except StopIteration:
+                param_device_type = self.device  # model with no parameters
+            if param_device_type != self.device:
+                model.to(self.device)
+        
         loss_eval_batch = 0.0
         eval_total = 0
         
-        y_true: torch.Tensor = torch.as_tensor([])
-        y_pred: torch.Tensor = torch.as_tensor([])
+        # Initialize CPU-side containers for metrics with correct dtype
+        y_true: torch.Tensor = torch.empty(0, dtype=torch.long)
+        y_pred: torch.Tensor = torch.empty(0, dtype=torch.long)
         
         with torch.no_grad():
             for batch_x, batch_y in self.dataloader:
@@ -151,8 +161,8 @@ class Evaluator(EvaluatorBase):
                 eval_total += target.size(0)
                 
                 # Collect preds and labels for metric calc
-                y_true = torch.cat((y_true, target.view(-1)))
-                y_pred = torch.cat((y_pred, predicted.view(-1)))
+                y_true = torch.cat((y_true, target.cpu().view(-1)))
+                y_pred = torch.cat((y_pred, predicted.cpu().view(-1)))
 
                 # Add the current batch loss
                 loss_eval_batch += pred_loss.item()
