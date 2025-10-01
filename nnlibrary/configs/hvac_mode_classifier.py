@@ -24,6 +24,8 @@ eval_batch_size = 512
 
 lr = 1e-3
 
+validation_metric_name = "avg_class_accuracy"
+
 # hooks.append()
 
 # TODO CONFIGS
