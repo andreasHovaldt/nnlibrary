@@ -1,4 +1,5 @@
 import os
+import time
 import shutil
 import datetime as dt
 from pathlib import Path
@@ -202,10 +203,33 @@ class ValidationHook(Hookbase):
                     detailed=self.trainer.cfg.validation_confusion_matrix,
                 )
         
-            result = self.validator.eval(
-                model=self.trainer.model
-            )
+            # Time the validation run (wall clock), sync CUDA if applicable
+            is_cuda = (self.trainer.device == 'cuda' and torch.cuda.is_available())
+            if is_cuda:
+                torch.cuda.synchronize()
+            _t0 = time.perf_counter()
+            result = self.validator.eval(model=self.trainer.model)
+            if is_cuda:
+                torch.cuda.synchronize()
+            val_wall_s = time.perf_counter() - _t0
             self.trainer.info["validation_result"] = result
+            
+            # Print and log validation timing
+            if comm.is_main_process():
+                print(f"[Timing] Validation wall time: {val_wall_s:.2f}s")
+                if self.trainer.wandb_run:
+                    try:
+                        self.trainer.wandb_run.log({
+                            'timing/val_wall_s': val_wall_s,
+                            'Epoch': self.trainer.info.get('epoch', 0) + 1,
+                        }, step=getattr(self.trainer.wandb_run, 'step', None))
+                    except Exception:
+                        pass
+                if self.trainer.tensorboard_writer:
+                    try:
+                        self.trainer.tensorboard_writer.add_scalar('timing/val_wall_s', val_wall_s, self.trainer.info.get('epoch', 0) + 1)
+                    except Exception:
+                        pass
         return None
 
 
@@ -241,13 +265,7 @@ class TestHook(Hookbase):
                 print(f"   {key}: {value:.4f}")
             
             if "confusion_matrix" in result:
-                import matplotlib.pyplot as plt
-                from matplotlib.figure import Figure
-                from matplotlib.axes import Axes
-                
                 fig, ax = result["confusion_matrix"]
-                fig: Figure
-                ax: Axes
                 
                 figure_dir = Path(self.trainer.save_path / "figures")
                 figure_dir.mkdir(parents=True, exist_ok=True)
@@ -295,6 +313,140 @@ class CheckpointerHook(Hookbase):
                     )
                     self.best_metric_value = metric_val
             
+
+class TimingHook(Hookbase):
+    """Lightweight timing hook that prints wall-clock times and (optionally) per-phase averages.
+
+    - Measures total, per-epoch, and per-step wall times using perf_counter.
+    - If the Trainer collects per-phase timings in trainer.info (timing_last_step, timing_epoch_avg),
+      this hook will also print those averages each epoch.
+    - Printing is limited to the main process.
+    """
+
+    def __init__(self, log_every: int = 50) -> None:
+        """Create a TimingHook.
+
+        Args:
+            log_every: If > 0, prints a brief step timing every N steps.
+        """
+        self.log_every = int(log_every) if log_every is not None else 0
+        if TYPE_CHECKING:
+            from .train import TrainerBase as _TrainerBase
+            self.trainer: Optional[_TrainerBase]
+        self._t_train_start = None
+        self._t_epoch_start = None
+        self._t_step_start = None
+        self._step_counter = 0
+        self._epoch_step_time_ms_total = 0.0
+        self._epoch_samples_total = 0
+
+    def before_train(self):
+        if comm.is_main_process():
+            self._t_train_start = time.perf_counter()
+
+    def before_epoch(self):
+        if comm.is_main_process():
+            self._t_epoch_start = time.perf_counter()
+            self._step_counter = 0
+            self._epoch_step_time_ms_total = 0.0
+            self._epoch_samples_total = 0
+
+    def before_step(self):
+        if comm.is_main_process():
+            self._t_step_start = time.perf_counter()
+            self._step_counter += 1
+
+    def after_step(self):
+        if not comm.is_main_process():
+            return
+        if self._t_step_start is None:
+            return
+        dt_ms = (time.perf_counter() - self._t_step_start) * 1000.0
+        self._epoch_step_time_ms_total += dt_ms
+        # Try to infer batch size to compute throughput
+        trainer = getattr(self, 'trainer', None)
+        if trainer is not None and hasattr(trainer, 'info'):
+            iter_data = trainer.info.get('iter_data')  # type: ignore[attr-defined]
+            if isinstance(iter_data, (tuple, list)) and len(iter_data) > 0:
+                x0 = iter_data[0]
+                if isinstance(x0, torch.Tensor) and x0.dim() > 0:
+                    self._epoch_samples_total += int(x0.shape[0])
+        # Optionally print every N steps to avoid excessive logs
+        if self.log_every and (self._step_counter % self.log_every == 0):
+            # Try to include forward/backward breakdown if available
+            brief = f"step={self._step_counter} wall={dt_ms:.1f}ms"
+            # If a WandB run exists, also log the step wall time
+            if trainer is not None and getattr(trainer, 'wandb_run', None):
+                try:
+                    trainer.wandb_run.log({
+                        'timing/train_step_ms': dt_ms,
+                        'Iter': self._step_counter,
+                    }, step=getattr(trainer.wandb_run, 'step', None))
+                except Exception:
+                    pass
+            # If TensorBoard is available, log step timing
+            if trainer is not None and getattr(trainer, 'tensorboard_writer', None):
+                try:
+                    trainer.tensorboard_writer.add_scalar('timing/train_step_ms', dt_ms, self._step_counter)
+                except Exception:
+                    pass
+            print(f"[Timing] {brief}")
+
+    def after_epoch(self):
+        if not comm.is_main_process():
+            return
+        if self._t_epoch_start is None:
+            return
+        epoch_ms = (time.perf_counter() - self._t_epoch_start) * 1000.0
+        trainer = getattr(self, 'trainer', None)
+        epoch_num = 0
+        if trainer is not None and hasattr(trainer, 'info'):
+            epoch_num = int(trainer.info.get('epoch', 0))  # type: ignore[attr-defined]
+        steps = max(self._step_counter, 1)
+        avg_step_ms = self._epoch_step_time_ms_total / steps
+        steps_per_s = 1000.0 / avg_step_ms if avg_step_ms > 0 else 0.0
+        samples_per_s = (self._epoch_samples_total / (epoch_ms / 1000.0)) if epoch_ms > 0 else 0.0
+        msg = f"[Timing] Epoch {epoch_num+1} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
+        # If trainer collected average per-phase times, include them
+        if trainer is not None and hasattr(trainer, 'info'):
+            avg = trainer.info.get('timing_epoch_avg')  # type: ignore[attr-defined]
+            if isinstance(avg, dict) and avg:
+                parts = []
+                for k in ('data_move_ms', 'forward_ms', 'backward_ms', 'optim_ms', 'sched_ms', 'step_total_ms'):
+                    if k in avg:
+                        parts.append(f"{k}={avg[k]:.1f}ms")
+                if parts:
+                    msg += " | avg " + ", ".join(parts)
+        print(msg)
+        # Log epoch timing metrics to WandB/TensorBoard if available
+        if trainer is not None and getattr(trainer, 'wandb_run', None):
+            try:
+                trainer.wandb_run.log({
+                    'timing/train_epoch_wall_s': epoch_ms / 1000.0,
+                    'timing/train_epoch_avg_step_ms': avg_step_ms,
+                    'timing/train_epoch_steps_per_s': steps_per_s,
+                    'timing/train_epoch_samples_per_s': samples_per_s,
+                    'Epoch': epoch_num + 1,
+                }, step=getattr(trainer.wandb_run, 'step', None))
+            except Exception:
+                pass
+        if trainer is not None and getattr(trainer, 'tensorboard_writer', None):
+            try:
+                writer = trainer.tensorboard_writer
+                writer.add_scalar('timing/train_epoch_wall_s', epoch_ms / 1000.0, epoch_num + 1)
+                writer.add_scalar('timing/train_epoch_avg_step_ms', avg_step_ms, epoch_num + 1)
+                writer.add_scalar('timing/train_epoch_steps_per_s', steps_per_s, epoch_num + 1)
+                writer.add_scalar('timing/train_epoch_samples_per_s', samples_per_s, epoch_num + 1)
+            except Exception:
+                pass
+
+    def after_train(self):
+        if not comm.is_main_process():
+            return
+        if self._t_train_start is None:
+            return
+        total_s = time.perf_counter() - self._t_train_start
+        print(f"[Timing] Total training wall time: {total_s:.2f}s")
 
 
 class SaveTrainingRun(Hookbase):

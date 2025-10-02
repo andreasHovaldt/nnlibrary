@@ -26,7 +26,9 @@ lr = 1e-3
 
 validation_metric_name = "avg_class_accuracy"
 
-# hooks.append()
+hooks.append(
+    h.TimingHook
+)
 
 # TODO CONFIGS
 # seed = None
@@ -52,12 +54,19 @@ model_config = BaseConfig(
 ### Loss function Config ####################
 #############################################
 loss_fn = BaseConfig(
-    name="FocalLoss",
+    name="CrossEntropyLoss",
     args=dict(
-        alpha = [0.27, 0.46, 2.28],
-        gamma = 2.0,
+        weight = [0.25, 0.50, 10.00],
     )
 )
+
+# loss_fn = BaseConfig(
+#     name="FocalLoss",
+#     args=dict(
+#         alpha = [0.27, 0.46, 2.28],
+#         gamma = 2.0,
+#     )
+# )
 
 
 
