@@ -21,3 +21,7 @@ class DataLoaderConfig:
     dataset: Any = None
     batch_size: int = 512
     shuffle: bool = True
+    num_workers: int | None = None
+    pin_memory: bool | None = None
+    persistent_workers: bool | None = None
+    prefetch_factor: int | None = None
