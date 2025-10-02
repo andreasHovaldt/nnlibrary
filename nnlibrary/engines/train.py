@@ -3,6 +3,7 @@ import wandb
 import logging
 import functools
 import weakref
+import os
 
 import datetime as dt
 
@@ -257,8 +258,30 @@ class Trainer(TrainerBase):
     
     
     def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader:
-        dataset = self.build_dataset(dataset_config=dataloader_config.dataset)
-        return DataLoader(dataset=dataset, batch_size=dataloader_config.batch_size, shuffle=dataloader_config.shuffle)
+        dataset: Dataset[Any] = self.build_dataset(dataset_config=dataloader_config.dataset)
+        
+        # Gracefully support optional perf params even if not present in config
+        if dataloader_config.num_workers: num_workers = dataloader_config.num_workers
+        else: num_workers = max(1, (os.cpu_count() or 2) // 2)
+        
+        if dataloader_config.pin_memory: pin_memory = dataloader_config.pin_memory
+        else: pin_memory = (self.device == 'cuda')
+        
+        if dataloader_config.persistent_workers: persistent_workers = dataloader_config.persistent_workers
+        else: persistent_workers = num_workers > 0
+        
+        if dataloader_config.prefetch_factor: prefetch_factor = dataloader_config.prefetch_factor
+        else: prefetch_factor = 2 if num_workers > 0 else None
+
+        return DataLoader(
+            dataset=dataset,
+            batch_size=dataloader_config.batch_size,
+            shuffle=dataloader_config.shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=(bool(persistent_workers) if num_workers > 0 else False),
+            prefetch_factor=(int(prefetch_factor) if (prefetch_factor is not None and num_workers > 0) else None),
+        )
     
     
     def build_optimizer(self, optimizer_config: BaseConfig) -> optim.Optimizer:
@@ -350,7 +373,7 @@ class Trainer(TrainerBase):
     def build_tensorboard_writer(self) -> tensorboardX.SummaryWriter | None:
         if self.cfg.enable_tensorboard and comm.is_main_process():
             writer = tensorboardX.SummaryWriter(str(self.save_path / "tensorboard"))
-            self.logger.info(f"Tensorboard writer logging dir: {self.save_path / "tensorboard"}")
+            self.logger.info(f"Tensorboard writer logging dir: {self.save_path / 'tensorboard'}")
             return writer
         else:
             return None

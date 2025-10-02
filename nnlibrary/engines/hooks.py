@@ -67,16 +67,14 @@ class WandbHook(Hookbase):
         if self.trainer and self.trainer.wandb_run:
             current_lr = self.trainer.info["current_lr"][0]
             loss_iter = self.trainer.info["loss_iter"]
-            # print("after_step: ", self.current_iter, current_lr, loss_iter)
             
             self.trainer.wandb_run.log(
                 data={
                     "Iter": self.current_iter,
                     "params/lr": current_lr,
                     "train_batch/loss": loss_iter,
-                },
-                #step=self.trainer.wandb_run.step,
-                step=self.current_iter,
+                }, 
+                step=self.current_iter
             )
             
     def after_epoch(self):
@@ -346,6 +344,12 @@ class TimingHook(Hookbase):
 
     def before_epoch(self):
         if comm.is_main_process():
+            # Ensure previous GPU work is accounted for before starting epoch timer
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
             self._t_epoch_start = time.perf_counter()
             self._step_counter = 0
             self._epoch_step_time_ms_total = 0.0
@@ -353,6 +357,11 @@ class TimingHook(Hookbase):
 
     def before_step(self):
         if comm.is_main_process():
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
             self._t_step_start = time.perf_counter()
             self._step_counter += 1
 
@@ -361,6 +370,11 @@ class TimingHook(Hookbase):
             return
         if self._t_step_start is None:
             return
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
         dt_ms = (time.perf_counter() - self._t_step_start) * 1000.0
         self._epoch_step_time_ms_total += dt_ms
         # Try to infer batch size to compute throughput
@@ -371,6 +385,7 @@ class TimingHook(Hookbase):
                 x0 = iter_data[0]
                 if isinstance(x0, torch.Tensor) and x0.dim() > 0:
                     self._epoch_samples_total += int(x0.shape[0])
+        
         # Optionally print every N steps to avoid excessive logs
         if self.log_every and (self._step_counter % self.log_every == 0):
             # Try to include forward/backward breakdown if available
@@ -378,10 +393,12 @@ class TimingHook(Hookbase):
             # If a WandB run exists, also log the step wall time
             if trainer is not None and getattr(trainer, 'wandb_run', None):
                 try:
-                    trainer.wandb_run.log({
-                        'timing/train_step_ms': dt_ms,
-                        'Iter': self._step_counter,
-                    }, step=getattr(trainer.wandb_run, 'step', None))
+                    trainer.wandb_run.log(
+                        data={
+                            'timing/train_step_ms': dt_ms,
+                        }, 
+                        step=trainer.wandb_run.step
+                    )
                 except Exception:
                     pass
             # If TensorBoard is available, log step timing
@@ -397,6 +414,11 @@ class TimingHook(Hookbase):
             return
         if self._t_epoch_start is None:
             return
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
         epoch_ms = (time.perf_counter() - self._t_epoch_start) * 1000.0
         trainer = getattr(self, 'trainer', None)
         epoch_num = 0
@@ -407,6 +429,7 @@ class TimingHook(Hookbase):
         steps_per_s = 1000.0 / avg_step_ms if avg_step_ms > 0 else 0.0
         samples_per_s = (self._epoch_samples_total / (epoch_ms / 1000.0)) if epoch_ms > 0 else 0.0
         msg = f"[Timing] Epoch {epoch_num+1} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
+        
         # If trainer collected average per-phase times, include them
         if trainer is not None and hasattr(trainer, 'info'):
             avg = trainer.info.get('timing_epoch_avg')  # type: ignore[attr-defined]
@@ -418,16 +441,19 @@ class TimingHook(Hookbase):
                 if parts:
                     msg += " | avg " + ", ".join(parts)
         print(msg)
+        
         # Log epoch timing metrics to WandB/TensorBoard if available
         if trainer is not None and getattr(trainer, 'wandb_run', None):
             try:
-                trainer.wandb_run.log({
-                    'timing/train_epoch_wall_s': epoch_ms / 1000.0,
-                    'timing/train_epoch_avg_step_ms': avg_step_ms,
-                    'timing/train_epoch_steps_per_s': steps_per_s,
-                    'timing/train_epoch_samples_per_s': samples_per_s,
-                    'Epoch': epoch_num + 1,
-                }, step=getattr(trainer.wandb_run, 'step', None))
+                trainer.wandb_run.log(
+                    data={
+                        'timing/train_epoch_wall_s': epoch_ms / 1000.0,
+                        'timing/train_epoch_avg_step_ms': avg_step_ms,
+                        'timing/train_epoch_steps_per_s': steps_per_s,
+                        'timing/train_epoch_samples_per_s': samples_per_s,
+                    }, 
+                    step=trainer.wandb_run.step
+                )
             except Exception:
                 pass
         if trainer is not None and getattr(trainer, 'tensorboard_writer', None):
