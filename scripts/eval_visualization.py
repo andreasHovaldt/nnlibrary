@@ -3,12 +3,12 @@
 Post-training evaluation visualization.
 
 Usage:
-  python scripts/eval_visualization.py <config_name> [--split test|val]
+    python scripts/eval_visualization.py <config_name> [--split test|val] [--interactive]
 
 Examples:
-  python scripts/eval_visualization.py hvac_mode_classifier
-  python scripts/eval_visualization.py nnlibrary.configs.hvac_mode_classifier --split val
-  python scripts/eval_visualization.py hvac_mode_classifier.py
+    python scripts/eval_visualization.py hvac_mode_classifier
+    python scripts/eval_visualization.py nnlibrary.configs.hvac_mode_classifier --split val
+    python scripts/eval_visualization.py hvac_mode_classifier.py --interactive
 """
 from __future__ import annotations
 
@@ -132,7 +132,24 @@ def restore_checkpoint(model: torch.nn.Module, cfg: Any, device: str) -> Path:
     return ckpt_path
 
 
-def run_eval_and_plot(cfg: Any, split: str = "test") -> None:
+def _to_numpy(x):
+    try:
+        import numpy as np  # noqa: F401
+    except Exception:
+        pass
+    if hasattr(x, 'detach'):
+        try:
+            return x.detach().cpu().numpy()
+        except Exception:
+            return x.detach().cpu().tolist()
+    try:
+        import numpy as np
+        return np.asarray(x)
+    except Exception:
+        return x
+
+
+def run_eval_and_plot(cfg: Any, split: str = "test", interactive: bool = False) -> None:
     from nnlibrary.engines.eval import Evaluator
 
     device = cfg.device if hasattr(cfg, 'device') else ('cuda' if torch.cuda.is_available() else 'cpu')
@@ -191,24 +208,44 @@ def run_eval_and_plot(cfg: Any, split: str = "test") -> None:
         print("Detailed sequences not returned; nothing to plot.")
         return
 
+    # Convert to numpy for plotting
+    y_true_np = _to_numpy(y_true)
+    y_pred_np = _to_numpy(y_pred)
     import numpy as np
-    t = np.arange(len(y_true))
-    fig, ax = plt.subplots(figsize=(14, 4))
-    ax.step(t, y_true, where='post', label='true', linewidth=1.2, alpha=0.9)
-    ax.step(t, y_pred, where='post', label='pred', linewidth=1.0, alpha=0.9)
-    ax.set_xlabel('sample index')
-    ax.set_ylabel('class id')
-    ax.set_title(f"{cfg.model_config.name} | {cfg.dataset_name} | split={split} | ckpt={Path(checkpoint_path).name}")
-    ax.legend(loc='upper right')
-    fig.tight_layout()
+    t = np.arange(len(y_true_np))
 
-    # Save figure next to model artifacts
+    # Save figures next to model artifacts
     fig_dir = PROJECT_ROOT / cfg.save_path / cfg.dataset_name / cfg.model_config.name / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
-    out_path = fig_dir / f"pred_vs_true_{split}.png"
-    fig.savefig(out_path)
+    base_title = f"{cfg.model_config.name} | {cfg.dataset_name} | split={split} | ckpt={Path(checkpoint_path).name}"
+
+    if interactive:
+        # Plotly HTML export (no fallback; require plotly if flag is used)
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            raise SystemExit("Plotly is required for --interactive. Install with: pip install plotly")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=t, y=y_true_np, name="true", mode="lines", line=dict(width=1.2)))
+        fig.add_trace(go.Scatter(x=t, y=y_pred_np, name="pred", mode="lines", line=dict(width=1.0), line_shape="hv"))
+        fig.update_layout(title=base_title, xaxis_title="sample index", yaxis_title="class id")
+        out_html = fig_dir / f"pred_vs_true_{split}.html"
+        fig.write_html(out_html, include_plotlyjs="cdn")
+        print(f"Saved interactive plot to: {out_html}")
+
+    # Matplotlib PNG export
+    fig, ax = plt.subplots(figsize=(14, 4))
+    ax.step(t, y_true_np, where='post', label='true', linewidth=1.2, alpha=0.9)
+    ax.step(t, y_pred_np, where='post', label='pred', linewidth=1.0, alpha=0.9)
+    ax.set_xlabel('sample index')
+    ax.set_ylabel('class id')
+    ax.set_title(base_title)
+    ax.legend(loc='upper right')
+    fig.tight_layout()
+    out_png = fig_dir / f"pred_vs_true_{split}.png"
+    fig.savefig(out_png)
     plt.close(fig)
-    print(f"Saved plot to: {out_path}")
+    print(f"Saved plot as PNG to: {out_png}")
 
 
 def main(argv: list[str]) -> None:
@@ -217,15 +254,29 @@ def main(argv: list[str]) -> None:
         sys.exit(1)
     config_name = argv[1]
     split = 'test'
-    if len(argv) >= 3 and argv[2] in ('--split', '-s'):
-        if len(argv) >= 4:
-            split = argv[3]
-        else:
-            print("Missing value for --split; expected 'test' or 'val'")
-            sys.exit(1)
+    interactive = False
+
+    # Lightweight arg parsing
+    args = argv[2:]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ('--split', '-s'):
+            if i + 1 >= len(args):
+                print("Missing value for --split; expected 'test' or 'val'")
+                sys.exit(1)
+            split = args[i + 1]
+            i += 2
+            continue
+        if a == '--interactive':
+            interactive = True
+            i += 1
+            continue
+        print(f"Unknown argument: {a}")
+        sys.exit(1)
 
     cfg = load_cfg(config_name)
-    run_eval_and_plot(cfg, split=split)
+    run_eval_and_plot(cfg, split=split, interactive=interactive)
 
 
 if __name__ == '__main__':

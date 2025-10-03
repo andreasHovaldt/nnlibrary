@@ -20,3 +20,4 @@ dependencies:
       - h5py
       - seaborn
       - scikit-learn
+      - plotly
