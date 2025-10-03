@@ -12,7 +12,7 @@ from .__base__ import BaseConfig, DataLoaderConfig
 ### General Config ##########################
 #############################################
 
-dataset_name = "14days_2025-09-09_2025-09-23" # "730days_2023-09-24_2025-09-23"
+dataset_name = "730days_2023-09-24_2025-09-23"
 data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 

@@ -250,8 +250,9 @@ class ValidationHook(Hookbase):
 
 
 class TestHook(Hookbase):
-    def __init__(self) -> None:
+    def __init__(self, checkpoint_name: str = 'best') -> None:
         self.tester = None
+        self.checkpoint_name = checkpoint_name
             
     
     def after_train(self):
@@ -269,9 +270,17 @@ class TestHook(Hookbase):
                     class_names=self.trainer.cfg.dataset.info["class_names"],
                     detailed=True,
                 )
-        
+
+            # Load in the desired checkpointed model
+            checkpoint_path = Path(self.trainer.save_path / "model" / f"model_{self.checkpoint_name}")
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            
+            checkpoint_model: torch.nn.Module = self.trainer.build_model(self.trainer.cfg.model_config)
+            checkpoint_model.load_state_dict(checkpoint["state_dict"])
+            
+            # Perform the test inference
             result = self.tester.eval(
-                model=self.trainer.model
+                model=checkpoint_model
             )
             self.trainer.info["test_result"] = result
             
@@ -452,16 +461,14 @@ class TimingHook(Hookbase):
             samples_per_s = (self._epoch_samples_total / (epoch_ms / 1000.0)) if epoch_ms > 0 else 0.0
             msg = f"[Timing] Epoch {epoch_num+1} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
             
-            # If trainer collected average per-phase times, include them
-            if trainer is not None and hasattr(trainer, 'info'):
-                avg = trainer.info.get('timing_epoch_avg')
-                if isinstance(avg, dict) and avg:
-                    parts = []
-                    for k in ('data_move_ms', 'forward_ms', 'backward_ms', 'optim_ms', 'sched_ms', 'step_total_ms'):
-                        if k in avg:
-                            parts.append(f"{k}={avg[k]:.1f}ms")
-                    if parts:
-                        msg += " | avg " + ", ".join(parts)
+            # Estimate remaining time:
+            if self._t_train_start:
+                total_s = time.perf_counter() - self._t_train_start
+                avg_epoch_t = total_s / (epoch_num + 1)
+                est_remain_s = int((avg_epoch_t * self.trainer.num_epochs) / 1000)
+                msg += f" | avg. epoch time: {avg_epoch_t / 1000:.2f}s/epoch | Est. remaining time: {est_remain_s}s"
+                
+            
             print(msg)
             
             # Log epoch timing metrics to WandB/TensorBoard if available
