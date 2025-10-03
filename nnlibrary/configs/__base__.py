@@ -18,6 +18,8 @@ class BaseConfig:
 
 @dataclass
 class DataLoaderConfig:
-    dataset: Any = None
-    batch_size: int = 512
-    shuffle: bool = True
+    dataset: Any
+    batch_size: int
+    shuffle: bool = False
+    num_workers: int | None = None
+    pin_memory: bool | None = None

@@ -113,13 +113,24 @@ class Evaluator(EvaluatorBase):
         # Use AMP autocast for evaluation (same as training)
         autocast = functools.partial(torch.autocast, device_type=self.device)
         
+        # Ensure model is on the correct device before evaluation
+        if isinstance(model, nn.Module):
+            try:
+                param_device_type = next(model.parameters()).device.type
+            except StopIteration:
+                param_device_type = self.device  # model with no parameters
+            if param_device_type != self.device:
+                model.to(self.device)
+        
         loss_eval_batch = 0.0
         eval_total = 0
         
-        y_true: torch.Tensor = torch.as_tensor([])
-        y_pred: torch.Tensor = torch.as_tensor([])
+        # Initialize CPU-side containers for metrics with correct dtype
+        y_true_list: list[torch.Tensor] = []
+        y_pred_list: list[torch.Tensor] = []
         
-        with torch.no_grad():
+        # inference_mode is faster than no_grad for eval-only paths
+        with torch.inference_mode():
             for batch_x, batch_y in self.dataloader:
                 
                 # TODO: Add better logging
@@ -150,14 +161,18 @@ class Evaluator(EvaluatorBase):
                 # Add the batch size to the total validation samples
                 eval_total += target.size(0)
                 
-                # Collect preds and labels for metric calc
-                y_true = torch.cat((y_true, target.view(-1)))
-                y_pred = torch.cat((y_pred, predicted.view(-1)))
+                # Collect preds and labels for metric calc (accumulate in lists to avoid repeated cat)
+                y_true_list.append(target.detach().to('cpu').view(-1))
+                y_pred_list.append(predicted.detach().to('cpu').view(-1))
 
                 # Add the current batch loss
                 loss_eval_batch += pred_loss.item()
                 
         
+        # Concatenate metrics once
+        y_true = torch.cat(y_true_list, dim=0) if y_true_list else torch.empty(0, dtype=torch.long)
+        y_pred = torch.cat(y_pred_list, dim=0) if y_pred_list else torch.empty(0, dtype=torch.long)
+
         # Calculate metrics
         loss = loss_eval_batch / len(self.dataloader)
         avg_sample_accuracy = self._average_sample_accuracy(y_true, y_pred)
