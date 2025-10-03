@@ -408,11 +408,10 @@ class TimingHook(Hookbase):
                     if isinstance(x0, torch.Tensor) and x0.dim() > 0:
                         self._epoch_samples_total += int(x0.shape[0])
             
-            # Optionally print every N steps to avoid excessive logs
+            # Log the step times
             if self.log_every and (self._step_counter % self.log_every == 0):
-                # Try to include forward/backward breakdown if available
-                brief = f"step={self._step_counter} wall={dt_ms:.1f}ms"
-                # If a WandB run exists, also log the step wall time
+
+                # If a WandB run exists, log step wall time
                 if trainer is not None and getattr(trainer, 'wandb_run', None):
                     try:
                         trainer.wandb_run.log(
@@ -423,13 +422,13 @@ class TimingHook(Hookbase):
                         )
                     except Exception:
                         pass
+                    
                 # If TensorBoard is available, log step timing
                 if trainer is not None and getattr(trainer, 'tensorboard_writer', None):
                     try:
                         trainer.tensorboard_writer.add_scalar('timing/train_step_ms', dt_ms, self._step_counter)
                     except Exception:
                         pass
-                print(f"[Timing] {brief}")
 
     def after_epoch(self):
         if self.trainer and self.trainer.cfg.timing:
@@ -446,7 +445,7 @@ class TimingHook(Hookbase):
             trainer = getattr(self, 'trainer', None)
             epoch_num = 0
             if trainer is not None and hasattr(trainer, 'info'):
-                epoch_num = int(trainer.info.get('epoch', 0))  # type: ignore[attr-defined]
+                epoch_num = int(trainer.info.get('epoch', 0))
             steps = max(self._step_counter, 1)
             avg_step_ms = self._epoch_step_time_ms_total / steps
             steps_per_s = 1000.0 / avg_step_ms if avg_step_ms > 0 else 0.0
@@ -455,7 +454,7 @@ class TimingHook(Hookbase):
             
             # If trainer collected average per-phase times, include them
             if trainer is not None and hasattr(trainer, 'info'):
-                avg = trainer.info.get('timing_epoch_avg')  # type: ignore[attr-defined]
+                avg = trainer.info.get('timing_epoch_avg')
                 if isinstance(avg, dict) and avg:
                     parts = []
                     for k in ('data_move_ms', 'forward_ms', 'backward_ms', 'optim_ms', 'sched_ms', 'step_total_ms'):
