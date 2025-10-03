@@ -272,7 +272,7 @@ class TestHook(Hookbase):
                 )
 
             # Load in the desired checkpointed model
-            checkpoint_path = Path(self.trainer.save_path / "model" / f"model_{self.checkpoint_name}")
+            checkpoint_path = Path(self.trainer.save_path / "model" / f"model_{self.checkpoint_name}.pth")
             checkpoint = torch.load(checkpoint_path, map_location='cpu')
             
             checkpoint_model: torch.nn.Module = self.trainer.build_model(self.trainer.cfg.model_config)
@@ -464,9 +464,9 @@ class TimingHook(Hookbase):
             # Estimate remaining time:
             if self._t_train_start:
                 total_s = time.perf_counter() - self._t_train_start
-                avg_epoch_t = total_s / (epoch_num + 1)
-                est_remain_s = int((avg_epoch_t * self.trainer.num_epochs) / 1000)
-                msg += f" | avg. epoch time: {avg_epoch_t / 1000:.2f}s/epoch | Est. remaining time: {est_remain_s}s"
+                avg_epoch_s = total_s / (epoch_num + 1)
+                est_remain_s = int((avg_epoch_s * (self.trainer.num_epochs - epoch_num - 1)))
+                msg += f" | avg. epoch time: {avg_epoch_s:.2f}s/epoch | Est. remaining training time: {str(dt.timedelta(seconds=est_remain_s))}"
                 
             
             print(msg)
