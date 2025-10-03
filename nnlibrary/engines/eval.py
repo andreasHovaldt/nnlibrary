@@ -193,11 +193,12 @@ class Evaluator(EvaluatorBase):
             result[f"class_{self.class_names[cls]}_accuracy"] = cls_acc.item()
             
         
-        # If detailed calculate the confusion matrix
+        # If detailed calculate the confusion matrix and return raw sequences
         if (self.detailed and len(y_true) > 0):
-            
             result.update({
                 "confusion_matrix": self._confusion_matrix(y_true=y_true, y_pred=y_pred, class_names=self.class_names),
+                "y_true_seq": y_true,
+                "y_pred_seq": y_pred,
             })
         
         return result
