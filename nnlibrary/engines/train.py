@@ -61,6 +61,7 @@ class TrainerBase:
         
     def train(self) -> None:
         
+        print("Started training...")
         self.before_train()
         
         for self.info["epoch"] in range(self.num_epochs):
