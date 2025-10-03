@@ -25,7 +25,7 @@ import nnlibrary.utils.comm as comm
 from .hooks import Hookbase
 
 from nnlibrary.configs import BaseConfig, DataLoaderConfig
-import nnlibrary.configs.hvac_mode_classifier as cfg_example
+import nnlibrary.configs.HVACModeMLP as cfg_example
 
 
 AMP_DTYPES = {
