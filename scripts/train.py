@@ -1,42 +1,94 @@
-import os
-import sys
-from pathlib import Path
+if __name__ == "__main__":
+    import sys
+    import os
+    import importlib
+    import importlib.util
+    import pkgutil
+    from types import ModuleType
+    from pathlib import Path
+    from typing import Any, cast
 
-# Add project root to Python path
-project_root = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(project_root))
+    if len(sys.argv) != 2:
+        print("Usage: python train.py <config_name>")
+        sys.exit(1)
+    config_name = str(sys.argv[1])
 
-import nnlibrary.configs.hvac_mode_classifier as cfg
-from nnlibrary.engines import Trainer
+    # Add project root to Python path
+    project_root = Path(__file__).parent.parent.resolve()
+    sys.path.insert(0, str(project_root))
 
-# Set environment variables
-wandb_key = None
+    def load_cfg(name: str) -> ModuleType:
+        """Load a config module by short name, dotted path, or file path.
 
-# First try to get from config
-if hasattr(cfg, 'wandb_key') and cfg.wandb_key:
-    wandb_key = cfg.wandb_key
-    if wandb_key: print("The wandb key was read from the config file, it is recommended to put it in a secrets file under '.secrets/wandb' instead for safety!")
-
-# If no key in config, try to read from .secrets/wandb file
-if wandb_key is None:
-    secrets_file = Path().cwd().resolve() / '.secrets' / 'wandb'
-    if secrets_file.exists():
+        Resolution order:
+          1) nnlibrary.configs.<name>
+          2) <name> as a dotted module path
+          3) file path under nnlibrary/configs (relative or absolute)
+        """
+        # 1) Try nnlibrary.configs.<name>
         try:
-            wandb_key = secrets_file.read_text().strip()
-        except Exception as e:
-            print(f"Warning: Could not read WandB key from {secrets_file}: {e}")
+            return importlib.import_module(f"nnlibrary.configs.{name}")
+        except ModuleNotFoundError:
+            pass
+        # 2) Try dotted path directly
+        try:
+            return importlib.import_module(name)
+        except ModuleNotFoundError:
+            pass
+        # 3) Treat as file path relative to configs dir by default
+        cfg_path = Path(name)
+        if not cfg_path.is_absolute():
+            cfg_path = project_root / "nnlibrary" / "configs" / cfg_path
+        if cfg_path.suffix != ".py":
+            cfg_path = cfg_path.with_suffix(".py")
+        if cfg_path.exists():
+            spec = importlib.util.spec_from_file_location(cfg_path.stem, cfg_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)  # type: ignore[attr-defined]
+                return module
+        # If all else fails, list available configs
+        try:
+            configs_pkg = importlib.import_module("nnlibrary.configs")
+            available = [name for _, name, ispkg in pkgutil.iter_modules(configs_pkg.__path__) if not ispkg and not name.startswith("__")]
+        except Exception:
+            available = []
+        raise SystemExit(f"Config '{name}' not found. Available: {', '.join(available) if available else 'no configs discovered'}")
 
-# Set the environment variable if we found a key
-if wandb_key:
-    os.environ['WANDB_API_KEY'] = wandb_key
-    print("WandB API key loaded successfully")
-else:
-    cfg.enable_wandb = False
-    print("No WandB API key found - WandB logging has been disabled")
+    cfg = load_cfg(config_name)
 
-# TODO: This option could be useful with a passed param for how many gpus to use
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use specific GPU
+    from nnlibrary.engines import Trainer
 
-trainer = Trainer(cfg=cfg)
+    if cfg.enable_wandb:
+        # Set wandb environment variable
+        wandb_key = None
 
-trainer.train()
+        # First try to get from config
+        if hasattr(cfg, 'wandb_key') and getattr(cfg, 'wandb_key'):
+            wandb_key = getattr(cfg, 'wandb_key')
+            if wandb_key:
+                print("The wandb key was read from the config file, it is recommended to put it in a secrets file under '.secrets/wandb' instead for safety!")
+
+        # If no key in config, try to read from .secrets/wandb file
+        if wandb_key is None:
+            secrets_file = Path().cwd().resolve() / '.secrets' / 'wandb'
+            if secrets_file.exists():
+                try:
+                    wandb_key = secrets_file.read_text().strip()
+                except Exception as e:
+                    print(f"Warning: Could not read WandB key from {secrets_file}: {e}")
+
+        # Set the environment variable if we found a key
+        if wandb_key:
+            os.environ['WANDB_API_KEY'] = wandb_key
+            print("WandB API key loaded successfully")
+        else:
+            if hasattr(cfg, 'enable_wandb'):
+                setattr(cfg, 'enable_wandb', False)
+            print("No WandB API key found - WandB logging has been disabled")
+
+    # TODO: This option could be useful with a passed param for how many gpus to use
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use specific GPU
+
+    trainer = Trainer(cfg=cast(Any, cfg))
+    trainer.train()
