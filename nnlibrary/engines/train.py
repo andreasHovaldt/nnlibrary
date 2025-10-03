@@ -5,9 +5,6 @@ import functools
 import weakref
 import os
 
-import datetime as dt
-
-from tqdm import tqdm
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +63,7 @@ class TrainerBase:
         
         self.before_train()
         
-        for self.info["epoch"] in tqdm(range(self.num_epochs)):
+        for self.info["epoch"] in range(self.num_epochs):
             self.before_epoch()
             
             for self.info["epoch_iter"], self.info["iter_data"] in enumerate(self.trainloader):
