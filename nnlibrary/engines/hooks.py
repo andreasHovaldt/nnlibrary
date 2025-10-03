@@ -109,12 +109,16 @@ class WandbHook(Hookbase):
                         
                         # Dump the remaining test metrics
                         else:
-                            self.trainer.wandb_run.log(
-                                data={
-                                    f"validation/{key}": value,
-                                },
-                                step=self.trainer.wandb_run.step,
-                            )
+                            try:
+                                self.trainer.wandb_run.log(
+                                    data={
+                                        f"validation/{key}": value,
+                                    },
+                                    step=self.trainer.wandb_run.step,
+                                )
+                            except:
+                                print(f"WARN: wandb.log failed for key '{key}' with type '{type(value)}'")
+                                
     
     def after_train(self):
         if self.trainer and self.trainer.wandb_run:
@@ -138,12 +142,15 @@ class WandbHook(Hookbase):
                         
                         # Dump the remaining test metrics
                         else:
-                            self.trainer.wandb_run.log(
-                                data={
-                                    f"test/{key}": value,
-                                },
-                                step=self.trainer.wandb_run.step,
-                            )
+                            try:
+                                self.trainer.wandb_run.log(
+                                    data={
+                                        f"test/{key}": value,
+                                    },
+                                    step=self.trainer.wandb_run.step,
+                                )
+                            except:
+                                print(f"WARN: wandb.log failed for key '{key}' with type '{type(value)}'")
                 
     
     
@@ -287,7 +294,8 @@ class TestHook(Hookbase):
             print(f"Final test result:")
             for key, value in result.items():
                 if key == "confusion_matrix": continue
-                print(f"   {key}: {value:.4f}")
+                try: print(f"   {key}: {value:.4f}")
+                except: print(f"WARN: test result print failed for key '{key}' with type '{type(value)}'")
             
             if "confusion_matrix" in result:
                 fig, ax = result["confusion_matrix"]
