@@ -266,12 +266,6 @@ class Trainer(TrainerBase):
         
         if dataloader_config.pin_memory: pin_memory = dataloader_config.pin_memory
         else: pin_memory = (self.device == 'cuda')
-        
-        if dataloader_config.persistent_workers: persistent_workers = dataloader_config.persistent_workers
-        else: persistent_workers = num_workers > 0
-        
-        if dataloader_config.prefetch_factor: prefetch_factor = dataloader_config.prefetch_factor
-        else: prefetch_factor = 2 if num_workers > 0 else None
 
         return DataLoader(
             dataset=dataset,
@@ -279,8 +273,6 @@ class Trainer(TrainerBase):
             shuffle=dataloader_config.shuffle,
             num_workers=num_workers,
             pin_memory=pin_memory,
-            persistent_workers=(bool(persistent_workers) if num_workers > 0 else False),
-            prefetch_factor=(int(prefetch_factor) if (prefetch_factor is not None and num_workers > 0) else None),
         )
     
     
