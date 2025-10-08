@@ -132,7 +132,7 @@ class WandbHook(Hookbase):
                     for key, value in test_result.items():
                         
                         # Specific logging cases
-                        if key == "confusion_matrix":
+                        if key in ("confusion_matrix", "prediction_plots"):
                             fig, ax = value
                             self.trainer.wandb_run.log(
                                 data={

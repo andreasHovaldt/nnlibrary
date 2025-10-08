@@ -406,7 +406,7 @@ class Trainer(TrainerBase):
                 
                 config = dict(
                     dataset = self.cfg.dataset_name,
-                    tast = self.cfg.task,
+                    task = self.cfg.task,
                     architecture = self.model_module,
                     model_name = self.cfg.model_config.name,
                     
