@@ -1,2 +1,2 @@
 from .train import Trainer
-from .eval import Evaluator
+from .eval import ClassificationEvaluator, RegressionEvaluator
