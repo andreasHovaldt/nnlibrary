@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 import wandb
 import torch
-from nnlibrary.engines.eval import Evaluator
+from nnlibrary.engines.eval import ClassificationEvaluator, RegressionEvaluator
 import nnlibrary.utils.comm as comm
 
 if TYPE_CHECKING:
@@ -183,30 +183,51 @@ class TensorBoardHook(Hookbase):
                 val_result: dict = self.trainer.info["validation_result"]
                 if isinstance(val_result, dict): # Check if dict so pylance doesn't cry
                     for key, value in val_result.items():
-                        if key == "confusion_matrix": continue
-                        self.trainer.tensorboard_writer.add_scalar(f"validation/{key}", value, epoch)
+                        # TODO: Implement plot logging for tensorboard
+                        if key == "confusion_matrix" or "prediction_plots":
+                            continue
+                        # Only log scalars to TensorBoard
+                        try:
+                            if isinstance(value, (int, float)):
+                                self.trainer.tensorboard_writer.add_scalar(f"validation/{key}", value, epoch)
+                            else: print(f"WARN: '{key}' is not an int or float and was not logged to tensorboard, type: {type(value)}")
+                        except Exception as e:
+                            print(f"WARN: Encountered an exception when logging to tensorboard: '{e}'")
         
 
 class ValidationHook(Hookbase):
     def __init__(self) -> None:
         self.validator = None
             
-    
     def after_epoch(self):
         
         if self.trainer and self.trainer.cfg.validate_model:
             
             if self.validator is None:
                 validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
-                self.validator = Evaluator(
-                    dataloader=validation_loader,
-                    loss_fn=self.trainer.loss_fn,
-                    device=self.trainer.device,
-                    amp_enable=self.trainer.amp_enable,
-                    amp_dtype=self.trainer.amp_dtype,
-                    class_names=self.trainer.cfg.dataset.info["class_names"],
-                    detailed=self.trainer.cfg.validation_confusion_matrix,
-                )
+                
+                if self.trainer.cfg.task == "classification":
+                    self.validator = ClassificationEvaluator(
+                        dataloader=validation_loader,
+                        loss_fn=self.trainer.loss_fn,
+                        device=self.trainer.device,
+                        amp_enable=self.trainer.amp_enable,
+                        amp_dtype=self.trainer.amp_dtype,
+                        class_names=self.trainer.cfg.dataset.info["class_names"],
+                        detailed=self.trainer.cfg.validation_plot,
+                    )
+                elif self.trainer.cfg.task == "regression":
+                    self.validator = RegressionEvaluator(
+                        dataloader=validation_loader,
+                        loss_fn=self.trainer.loss_fn,
+                        device=self.trainer.device,
+                        amp_enable=self.trainer.amp_enable,
+                        amp_dtype=self.trainer.amp_dtype,
+                        output_names=self.trainer.cfg.dataset.info["class_names"],
+                        detailed=self.trainer.cfg.validation_plot,
+                    )
+                else: 
+                    raise ValueError(f"Unknown task '{self.trainer.cfg.task}' for ValidationHook")
         
             # Time the validation run (wall clock), sync CUDA if applicable
             is_cuda = (self.trainer.device == 'cuda' and torch.cuda.is_available())
@@ -260,7 +281,6 @@ class TestHook(Hookbase):
     def __init__(self, checkpoint_name: str = 'best') -> None:
         self.tester = None
         self.checkpoint_name = checkpoint_name
-            
     
     def after_train(self):
         
@@ -268,15 +288,29 @@ class TestHook(Hookbase):
             
             if self.tester is None:
                 test_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.test)
-                self.tester = Evaluator(
-                    dataloader=test_loader,
-                    loss_fn=self.trainer.loss_fn,
-                    device=self.trainer.device,
-                    amp_enable=self.trainer.amp_enable,
-                    amp_dtype=self.trainer.amp_dtype,
-                    class_names=self.trainer.cfg.dataset.info["class_names"],
-                    detailed=True,
-                )
+                
+                if self.trainer.cfg.task == "classification":
+                    self.tester = ClassificationEvaluator(
+                        dataloader=test_loader,
+                        loss_fn=self.trainer.loss_fn,
+                        device=self.trainer.device,
+                        amp_enable=self.trainer.amp_enable,
+                        amp_dtype=self.trainer.amp_dtype,
+                        class_names=self.trainer.cfg.dataset.info["class_names"],
+                        detailed=True,
+                    )
+                elif self.trainer.cfg.task == "regression":
+                    self.tester = RegressionEvaluator(
+                        dataloader=test_loader,
+                        loss_fn=self.trainer.loss_fn,
+                        device=self.trainer.device,
+                        amp_enable=self.trainer.amp_enable,
+                        amp_dtype=self.trainer.amp_dtype,
+                        output_names=self.trainer.cfg.dataset.info["class_names"],
+                        detailed=True,
+                    )
+                else:
+                    raise ValueError(f"Unknown task '{self.trainer.cfg.task}' for TestHook")
 
             # Load in the desired checkpointed model
             checkpoint_path = Path(self.trainer.save_path / "model" / f"model_{self.checkpoint_name}.pth")
@@ -293,17 +327,31 @@ class TestHook(Hookbase):
             
             print(f"Final test result:")
             for key, value in result.items():
-                if key == "confusion_matrix": continue
-                try: print(f"   {key}: {value:.4f}")
-                except: print(f"WARN: test result print failed for key '{key}' with type '{type(value)}'")
-            
+                if key in ("confusion_matrix", "prediction_plots", "y_true_seq", "y_pred_seq"):
+                    continue
+                try:
+                    print(f"   {key}: {float(value):.4f}")
+                except Exception:
+                    print(f"WARN: test result print skipped for key '{key}' (type {type(value)})")
+
+            figure_dir = Path(self.trainer.save_path / "figures")
+            figure_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save classification confusion matrix if present
             if "confusion_matrix" in result:
-                fig, ax = result["confusion_matrix"]
-                
-                figure_dir = Path(self.trainer.save_path / "figures")
-                figure_dir.mkdir(parents=True, exist_ok=True)
-                
-                fig.savefig(figure_dir / "confusion_matrix_test_split.png")
+                try:
+                    fig, ax = result["confusion_matrix"]
+                    fig.savefig(figure_dir / "confusion_matrix_test_split.png")
+                except Exception:
+                    pass
+
+            # Save regression prediction plots if present
+            if "prediction_plots" in result:
+                try:
+                    fig, axes = result["prediction_plots"]
+                    fig.savefig(figure_dir / "pred_vs_true_test.png")
+                except Exception:
+                    pass
                 
         return None
   
@@ -311,7 +359,6 @@ class TestHook(Hookbase):
 class CheckpointerHook(Hookbase):
     def __init__(self) -> None:
         self.best_metric_value: float = 0.0
-        
         
     def after_epoch(self):
         if self.trainer is not None and comm.is_main_process():

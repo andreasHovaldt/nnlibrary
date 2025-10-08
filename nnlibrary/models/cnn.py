@@ -58,7 +58,7 @@ class TCN(nn.Module):
         if hidden_layer_sizes is None: hidden_layer_sizes = [64, 64, 128, 128]
         
         # Add input size to layer list
-        channels = [input_dim] + hidden_layer_sizes
+        self.channels = [input_dim] + hidden_layer_sizes
         
         # Compute receptive field for information; warn if sequence is shorter than receptive field
         # R = 1 + (K - 1) * sum_{i=0..N-1} 2^i = 1 + (K - 1) * (2^N - 1)
@@ -79,8 +79,8 @@ class TCN(nn.Module):
             dilation = 2 ** i # As I understand, the dilation factor increases the receptive field of the conv operations
             self.tcn_residual_blocks.append(
                 TCNResidualBlock(
-                    in_channels=channels[i],
-                    out_channels=channels[i+1],
+                    in_channels=self.channels[i],
+                    out_channels=self.channels[i+1],
                     kernel_size=kernel_size,
                     dilation=dilation,
                     dropout=dropout,
@@ -89,7 +89,7 @@ class TCN(nn.Module):
             )
         
         self.global_pool = nn.AdaptiveAvgPool1d(output_size=1)
-        self.classifier = nn.Linear(in_features=channels[-1], out_features=num_classes)
+        self.prediction_head = nn.Linear(in_features=self.channels[-1], out_features=num_classes)
         
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -104,12 +104,42 @@ class TCN(nn.Module):
         
         # Decoder
         x = self.global_pool(x).squeeze(-1)
-        logits = self.classifier(x)
+        logits = self.prediction_head(x)
         
         return logits
         
         
+class TCNRegression(TCN):
+    def __init__(
+        self, 
+        input_dim: int, 
+        sequence_length: int, 
+        num_classes: int, 
+        regression_head_hidden_dim: int,
+        hidden_layer_sizes: list | None, 
+        kernel_size: int = 3, 
+        dropout: float = 0.3, 
+        dropout_type: str = "channel"
+    ) -> None:
+        super().__init__(
+            input_dim=input_dim, 
+            sequence_length=sequence_length, 
+            num_classes=num_classes, 
+            hidden_layer_sizes=hidden_layer_sizes, 
+            kernel_size=kernel_size, 
+            dropout=dropout, 
+            dropout_type=dropout_type,
+        )
         
+        # The regression head
+        regression_head = nn.Sequential(
+            nn.Linear(self.channels[-1], regression_head_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(regression_head_hidden_dim, num_classes)
+        )
+        self.prediction_head = regression_head
+
     
 
 class TCNResidualBlock(nn.Module):
