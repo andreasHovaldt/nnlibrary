@@ -298,9 +298,7 @@ class RegressionEvaluator(EvaluatorBase):
             result.update({
                 "y_true_seq": y_true,
                 "y_pred_seq": y_pred,
-                "prediction_plots": self._create_prediction_plots(
-                    y_true, y_pred
-                ),
+                "prediction_plots": self._create_prediction_plots(y_true, y_pred),
             })
         
         return result
@@ -350,11 +348,11 @@ class RegressionEvaluator(EvaluatorBase):
         output_names = self.output_names if self.output_names else [f"Output {i}" for i in range(num_outputs)]
         
         # Create subplots for each output
-        fig, axes = plt.subplots(1, num_outputs, figsize=(6 * num_outputs, 5))
+        fig, ax = plt.subplots(1, num_outputs, figsize=(6 * num_outputs, 5))
         if num_outputs == 1:
-            axes = [axes]
+            ax = [ax]
         
-        for i, (ax, name) in enumerate(zip(axes, output_names)):
+        for i, (ax, name) in enumerate(zip(ax, output_names)):
             y_true_i = y_true[:, i].numpy()
             y_pred_i = y_pred[:, i].numpy()
             
@@ -373,4 +371,4 @@ class RegressionEvaluator(EvaluatorBase):
             ax.grid(True, alpha=0.3)
         
         fig.tight_layout()
-        return fig, axes
+        return fig, ax
