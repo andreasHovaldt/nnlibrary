@@ -411,6 +411,7 @@ class Trainer(TrainerBase):
                     model_name = self.cfg.model_config.name,
                     
                     epochs = self.cfg.num_epochs,
+                    batch_size = self.cfg.train_batch_size,
                     learning_rate = self.cfg.lr,
                     
                     loss_fn = self.cfg.loss_fn.name, # TODO: Look into logging the args as well

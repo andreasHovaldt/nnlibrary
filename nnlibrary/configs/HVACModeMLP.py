@@ -17,6 +17,7 @@ data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
+task = "classification"
 
 num_epochs = 10
 train_batch_size = 512
@@ -25,6 +26,7 @@ eval_batch_size = 512
 lr = 1e-3
 
 validation_metric_name = "avg_class_accuracy"
+validation_metric_higher_is_better = True
 
 # TODO CONFIGS
 # seed = None

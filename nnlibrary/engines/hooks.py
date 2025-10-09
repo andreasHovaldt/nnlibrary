@@ -1,6 +1,7 @@
 import os
 import time
 import shutil
+import numpy as np
 import datetime as dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
 class Hookbase:
     """
     Base class for hooks that can be registered with :class:`TrainerBase`.
+    
+    NOTE: self.trainer cannot be accessed duing hook __init__
     
     To avoid circular reference, hooks and trainer cannot own each other.
     This normally does not matter, but will cause memory leak if the
@@ -358,7 +361,8 @@ class TestHook(Hookbase):
 
 class CheckpointerHook(Hookbase):
     def __init__(self) -> None:
-        self.best_metric_value: float = 0.0
+        self.best_metric_value_high: float = 0.0
+        self.best_metric_value_low: float = np.inf
         
     def after_epoch(self):
         if self.trainer is not None and comm.is_main_process():
@@ -383,15 +387,27 @@ class CheckpointerHook(Hookbase):
             if self.trainer.cfg.validate_model:
                 metric_val = None
                 val_result = self.trainer.info.get("validation_result")
+                
                 if isinstance(val_result, dict):
                     metric_val = val_result.get(self.trainer.cfg.validation_metric_name)
-                if metric_val is not None and metric_val > self.best_metric_value:
+                
+                if self.trainer.cfg.validation_metric_higher_is_better:
                     # Copy the last model if it was the best
-                    shutil.copyfile(
-                        save_dir / "model_last.pth",
-                        save_dir / "model_best.pth",
-                    )
-                    self.best_metric_value = metric_val
+                    if metric_val is not None and metric_val > self.best_metric_value_high:
+                        print(f"New best model! Previous best metric value: {self.best_metric_value_high:.4f}. New best metric value: {metric_val:.4f}")
+                        shutil.copyfile(
+                            save_dir / "model_last.pth",
+                            save_dir / "model_best.pth",
+                        )
+                        self.best_metric_value_high = metric_val
+                else:
+                    if metric_val is not None and metric_val < self.best_metric_value_low:
+                        print(f"New best model! Previous best metric value: {self.best_metric_value_low:.4f}. New best metric value: {metric_val:.4f}")
+                        shutil.copyfile(
+                            save_dir / "model_last.pth",
+                            save_dir / "model_best.pth",
+                        )
+                        self.best_metric_value_low = metric_val
             
 
 class TimingHook(Hookbase):
@@ -514,7 +530,7 @@ class TimingHook(Hookbase):
             avg_step_ms = self._epoch_step_time_ms_total / steps
             steps_per_s = 1000.0 / avg_step_ms if avg_step_ms > 0 else 0.0
             samples_per_s = (self._epoch_samples_total / (epoch_ms / 1000.0)) if epoch_ms > 0 else 0.0
-            msg = f"[Timing] Epoch {epoch_num+1} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
+            msg = f"[Timing] Epoch {epoch_num+1}/{self.trainer.num_epochs} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
             
             # Estimate remaining time:
             if self._t_train_start:
