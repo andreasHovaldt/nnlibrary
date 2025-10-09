@@ -132,6 +132,7 @@ class Standardize(v2.Transform):
             A tensor with the same shape and dtype as ``inpt`` where per-feature standardization
             has been applied.
         """
+        assert type(inpt) == torch.Tensor, f"'Standardize' transform expects inputs to be of type torch.Tensor, got {type(inpt)}"
         # Move mean/std to same device as input
         mean = self.mean.to(inpt.device)
         std = self.std.to(inpt.device)
