@@ -185,13 +185,13 @@ class MpcDatasetHDF5(Dataset):
             x = np.array(x)
             y = np.array(y)
         
-        if self.transform:
-            x = self.transform(x)
-        if self.target_transform:
-            y = self.target_transform(y)
-        
         x = torch.as_tensor(x, dtype=torch.float32)
         y = torch.as_tensor(y, dtype=torch.float32 if self.one_hot or self.task == 'regression' else torch.long)
+        
+        if self.transform is not None:
+            x = self.transform(x)
+        if self.target_transform is not None:
+            y = self.target_transform(y)
         
         return x, y
     
