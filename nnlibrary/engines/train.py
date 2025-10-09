@@ -5,9 +5,6 @@ import functools
 import weakref
 import os
 
-import datetime as dt
-
-from tqdm import tqdm
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +22,7 @@ import nnlibrary.utils.comm as comm
 from .hooks import Hookbase
 
 from nnlibrary.configs import BaseConfig, DataLoaderConfig
-import nnlibrary.configs.hvac_mode_classifier as cfg_example
+import nnlibrary.configs.HVACModeMLP as cfg_example
 
 
 AMP_DTYPES = {
@@ -49,7 +46,6 @@ class TrainerBase:
         
         self.model: nn.Module
         self.trainloader: DataLoader
-        # self.valloader: DataLoader
         
         self.optimizer: optim.Optimizer
         self.scheduler: optim.lr_scheduler.LRScheduler
@@ -64,9 +60,10 @@ class TrainerBase:
         
     def train(self) -> None:
         
+        print("Started training...")
         self.before_train()
         
-        for self.info["epoch"] in tqdm(range(self.num_epochs)):
+        for self.info["epoch"] in range(self.num_epochs):
             self.before_epoch()
             
             for self.info["epoch_iter"], self.info["iter_data"] in enumerate(self.trainloader):
@@ -129,7 +126,6 @@ class Trainer(TrainerBase):
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
         self.logger: logging.Logger = logging.getLogger()
         self.num_epochs: int = cfg.num_epochs
-        # self.max_iter = 0 # <- it seems this only relates to calculating an ETA, so maybe the number of epochs * len(dataloader)? (Total batches to process during training)
         
         self.device: str = cfg.device
         self.amp_enable: bool = cfg.amp_enable
@@ -137,7 +133,6 @@ class Trainer(TrainerBase):
         
         self.model = self.build_model(cfg.model_config)
         self.trainloader = self.build_dataloader(cfg.dataset.train)
-        # self.valloader = self.build_dataloader(cfg.dataset.val)
         
         self.optimizer = self.build_optimizer(cfg.optimizer)
         self.scheduler = self.build_scheduler(cfg.scheduler)
@@ -232,7 +227,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
 
 
-    def build_dataset(self, dataset_config: BaseConfig) -> Dataset:
+    def build_dataset(self, dataset_config: BaseConfig, standardize_target = False) -> Dataset:
         """Build dataset from configuration.
     
         Args:
@@ -252,13 +247,40 @@ class Trainer(TrainerBase):
         # Get the dataset class from the datasets module
         if hasattr(nnlibrary.datasets, dataset_name):
             dataset_class = getattr(nnlibrary.datasets, dataset_name)
-            return dataset_class(**dataset_args)
+            if not standardize_target:
+                return dataset_class(**dataset_args)
+            else:
+                stats_dir = self.cfg.data_root / "stats"
+                try:
+                    from nnlibrary.utils.operations import Standardize
+                    import numpy as np
+                    standardize_transform = Standardize(
+                        mean=np.load(stats_dir / "target_mean.npy").astype(float).tolist(),
+                        std=np.load(stats_dir / "target_std.npy").astype(float).tolist(),
+                    )
+                    # print("using standardized targets!")
+                    return dataset_class(target_transform=standardize_transform, **dataset_args)
+                
+                except TypeError as e:
+                    print(e)
+                    print(f"WARN: {e}!")
+                    if input("Try to continue without standardized targets? (y/n) ").lower() == 'y':
+                        print("Continuing without standardized targets...")
+                        return dataset_class(**dataset_args)
+                    else: exit()
+                
+                except FileNotFoundError as e:
+                    print(f"WARN: {e}!")
+                    if input("Continue without standardized targets? (y/n) ").lower() == 'y':
+                        print("Continuing without standardized targets..")
+                        return dataset_class(**dataset_args)
+                    else: exit()
         else:
             raise ValueError(f"Dataset '{dataset_name}' not found in nnlibrary.datasets")
     
     
     def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader:
-        dataset: Dataset[Any] = self.build_dataset(dataset_config=dataloader_config.dataset)
+        dataset: Dataset[Any] = self.build_dataset(dataset_config=dataloader_config.dataset, standardize_target=self.cfg.dataset.info.get("standardize_target", False))
         
         # Gracefully support optional perf params even if not present in config
         if dataloader_config.num_workers: num_workers = dataloader_config.num_workers
@@ -384,6 +406,7 @@ class Trainer(TrainerBase):
                 
                 config = dict(
                     dataset = self.cfg.dataset_name,
+                    task = self.cfg.task,
                     architecture = self.model_module,
                     model_name = self.cfg.model_config.name,
                     

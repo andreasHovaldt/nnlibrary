@@ -11,7 +11,7 @@ timing = True # Whether to time the run
 
 validate_model = True # Whether to validate the model while training
 validation_metric_name = "loss" # The metric used to determine the best model
-validation_confusion_matrix = False # Whether to create a confusion matrix based on the validation each epoch (Only available on wandb)
+validation_plot = False # Whether to create a plot based on the validation each epoch (Only available on wandb)
 
 test_model = True # Whether to test the model post training
 

@@ -48,10 +48,11 @@ class MpcDataset(Dataset):
 class MpcDatasetHDF5(Dataset):
     """Optimized HDF5 dataset with memory reporting."""
     
-    def __init__(self, hdf5_file: Path, transform=None, target_transform=None, cache_in_memory: bool = False, chunk_cache_size: int = 32*1024*1024, verbose=False):
+    def __init__(self, hdf5_file: Path, task: str = 'classification', transform=None, target_transform=None, cache_in_memory: bool = False, chunk_cache_size: int = 32*1024*1024, verbose=False):
         """
         Arguments:
             hdf5_file (Path): Path to the HDF5 file
+            task (str): Either 'classification' or 'regression'
             transform: Optional transform for input data
             target_transform: Optional transform for target data
             cache_in_memory (bool): Load entire dataset into RAM
@@ -61,6 +62,7 @@ class MpcDatasetHDF5(Dataset):
                 - 256*1024*1024 (256MB): Maximum recommended for most cases
         """
         self.hdf5_file = Path(hdf5_file)
+        self.task = task
         self.transform = transform
         self.target_transform = target_transform
         self.cache_in_memory = cache_in_memory
@@ -183,16 +185,20 @@ class MpcDatasetHDF5(Dataset):
             x = np.array(x)
             y = np.array(y)
         
-        if self.transform:
-            x = self.transform(x)
-        if self.target_transform:
-            y = self.target_transform(y)
-        
         x = torch.as_tensor(x, dtype=torch.float32)
-        y = torch.as_tensor(y, dtype=torch.float32 if self.one_hot else torch.long)
+        y = torch.as_tensor(y, dtype=torch.float32 if self.one_hot or self.task == 'regression' else torch.long)
+        
+        if self.transform is not None:
+            x = self.transform(x)
+        if self.target_transform is not None:
+            y = self.target_transform(y)
         
         return x, y
     
     def __del__(self):
-        if self._file_handle is not None:
-            self._file_handle.close()
+        try:
+            if self._file_handle is not None:
+                self._file_handle.close()
+
+        except AttributeError as e:
+            print(f"Silently ignoring exception: {e}")
