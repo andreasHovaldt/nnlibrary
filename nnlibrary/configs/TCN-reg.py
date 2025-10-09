@@ -26,6 +26,7 @@ eval_batch_size = 512
 lr = 1e-3
 
 validation_metric_name = "loss"
+validation_metric_higher_is_better = False
 
 # TODO CONFIGS
 # seed = None
