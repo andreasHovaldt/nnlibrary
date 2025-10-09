@@ -150,7 +150,7 @@ def _to_numpy(x):
 
 
 def run_eval_and_plot(cfg: Any, split: str = "test", interactive: bool = False) -> None:
-    from nnlibrary.engines.eval import Evaluator
+    from nnlibrary.engines.eval import ClassificationEvaluator
 
     device = cfg.device if hasattr(cfg, 'device') else ('cuda' if torch.cuda.is_available() else 'cpu')
     amp_enable = getattr(cfg, 'amp_enable', True)
@@ -188,7 +188,7 @@ def run_eval_and_plot(cfg: Any, split: str = "test", interactive: bool = False) 
 
     class_names = cfg.dataset.info.get("class_names", [str(i) for i in range(cfg.dataset.info.get("num_classes", 0))])
 
-    evaluator = Evaluator(
+    evaluator = ClassificationEvaluator(
         dataloader=loader,
         loss_fn=loss_fn,
         device=device,
