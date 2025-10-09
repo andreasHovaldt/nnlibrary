@@ -1,2 +1,2 @@
-from .mlp import HVACModeMLP, SimpleMultiTaskModel, SimpleClassificationModel
+from .mlp import HVACModeMLP, HVACActuatorMLP, SimpleMultiTaskModel, SimpleClassificationModel
 from .cnn import TCN, TCNRegression
