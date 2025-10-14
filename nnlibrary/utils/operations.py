@@ -144,3 +144,49 @@ class Standardize(v2.Transform):
         mean = self.mean.to(inpt.device)
         std = self.std.to(inpt.device)
         return ((inpt * (std + self.eps)) + mean).to(dtype=inpt.dtype, device=inpt.device)
+
+
+class MinMaxNormalize(v2.Transform):
+    """Per-feature Min-Max normalization transform for tensors.
+
+    Maps each feature to the [0, 1] range using x' = (x - min) / (max - min + eps),
+    assuming feature dimension is last. Works with shapes like (T, F) or (N, T, F).
+
+    Args:
+        min_vals: Sequence of per-feature minimum values of length F
+        max_vals: Sequence of per-feature maximum values of length F
+        eps: Small constant added to the denominator to avoid division by zero (default: 1e-8)
+
+    Example:
+        >>> t = torch.randn(8, 100, 5)
+        >>> tr = MinMaxNormalize(min_vals=[-5]*5, max_vals=[5]*5)
+        >>> y = tr(t)
+        >>> y.shape
+        torch.Size([8, 100, 5])
+    """
+    def __init__(self, min_vals: Sequence[float], max_vals: Sequence[float], eps: float = 1e-8):
+        super().__init__()
+        assert len(min_vals) == len(max_vals), "min_vals and max_vals must have the same length!"
+        self.min_vals = torch.as_tensor(min_vals, dtype=torch.float32)
+        self.max_vals = torch.as_tensor(max_vals, dtype=torch.float32)
+        self.eps = eps
+
+    def transform(self, inpt: torch.Tensor, params: dict[str, Any]) -> Any:
+        """Apply Min-Max normalization to the input tensor.
+
+        Assumes feature dimension is last and min/max are length-F vectors.
+        """
+        assert type(inpt) == torch.Tensor, f"'MinMaxNormalize' expects torch.Tensor, got {type(inpt)}"
+        minv = self.min_vals.to(inpt.device)
+        maxv = self.max_vals.to(inpt.device)
+        return ((inpt - minv) / ((maxv - minv) + self.eps)).to(dtype=inpt.dtype, device=inpt.device)
+
+    def inverse_transform(self, inpt: torch.Tensor) -> torch.Tensor:
+        """Invert Min-Max normalization back to original scale.
+
+        x = inpt * (max - min + eps) + min
+        """
+        assert type(inpt) == torch.Tensor, f"'MinMaxNormalize' expects torch.Tensor, got {type(inpt)}"
+        minv = self.min_vals.to(inpt.device)
+        maxv = self.max_vals.to(inpt.device)
+        return (inpt * ((maxv - minv) + self.eps) + minv).to(dtype=inpt.dtype, device=inpt.device)
