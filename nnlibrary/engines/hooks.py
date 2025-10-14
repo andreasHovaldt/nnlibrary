@@ -220,6 +220,13 @@ class ValidationHook(Hookbase):
                         detailed=self.trainer.cfg.validation_plot,
                     )
                 elif self.trainer.cfg.task == "regression":
+                    
+                    # Provide inverse-transform for calculating on original value ranges if available
+                    inv_transform = None
+                    transform = getattr(self.trainer, 'standardize_transform', None)
+                    if transform is not None and hasattr(transform, 'inverse_transform'):
+                        inv_transform = transform.inverse_transform
+                    
                     self.validator = RegressionEvaluator(
                         dataloader=validation_loader,
                         loss_fn=self.trainer.loss_fn,
@@ -228,6 +235,7 @@ class ValidationHook(Hookbase):
                         amp_dtype=self.trainer.amp_dtype,
                         output_names=self.trainer.cfg.dataset.info["class_names"],
                         detailed=self.trainer.cfg.validation_plot,
+                        inverse_transform=inv_transform,
                     )
                 else: 
                     raise ValueError(f"Unknown task '{self.trainer.cfg.task}' for ValidationHook")
@@ -303,6 +311,13 @@ class TestHook(Hookbase):
                         detailed=True,
                     )
                 elif self.trainer.cfg.task == "regression":
+                    
+                    # Provide inverse-transform for calculating on original value ranges if available
+                    inv_transform = None
+                    transform = getattr(self.trainer, 'standardize_transform', None)
+                    if transform is not None and hasattr(transform, 'inverse_transform'):
+                        inv_transform = transform.inverse_transform
+                    
                     self.tester = RegressionEvaluator(
                         dataloader=test_loader,
                         loss_fn=self.trainer.loss_fn,
@@ -311,6 +326,7 @@ class TestHook(Hookbase):
                         amp_dtype=self.trainer.amp_dtype,
                         output_names=self.trainer.cfg.dataset.info["class_names"],
                         detailed=True,
+                        inverse_transform=inv_transform,
                     )
                 else:
                     raise ValueError(f"Unknown task '{self.trainer.cfg.task}' for TestHook")
