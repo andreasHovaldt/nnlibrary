@@ -137,3 +137,10 @@ class Standardize(v2.Transform):
         mean = self.mean.to(inpt.device)
         std = self.std.to(inpt.device)
         return ((inpt - mean) / (std + self.eps)).to(dtype=inpt.dtype, device=inpt.device)
+    
+    def inverse_transform(self, inpt: torch.Tensor) -> torch.Tensor:
+        """Apply inverse standardization to the input tensor."""
+        assert type(inpt) == torch.Tensor, f"'Standardize' transform expects inputs to be of type torch.Tensor, got {type(inpt)}"
+        mean = self.mean.to(inpt.device)
+        std = self.std.to(inpt.device)
+        return ((inpt * (std + self.eps)) + mean).to(dtype=inpt.dtype, device=inpt.device)
