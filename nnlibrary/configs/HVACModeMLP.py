@@ -114,7 +114,7 @@ dataset.train = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size = train_batch_size, # TODO: Move this away form the config file and use the cfg.train_batch_size param instead
+    batch_size = train_batch_size,
     shuffle = True,
 )
 
@@ -126,7 +126,7 @@ dataset.val = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size=train_batch_size, # FIXME: ^^^^
+    batch_size=eval_batch_size,
     shuffle=False,
 )
 
@@ -138,6 +138,6 @@ dataset.test = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size=eval_batch_size, # FIXME: ^^^^
+    batch_size=eval_batch_size,
     shuffle=False,
 )
