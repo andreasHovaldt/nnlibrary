@@ -254,12 +254,12 @@ class Trainer(TrainerBase):
                 try:
                     from nnlibrary.utils.operations import Standardize
                     import numpy as np
-                    standardize_transform = Standardize(
+                    self.standardize_transform = Standardize(
                         mean=np.load(stats_dir / "target_mean.npy").astype(float).tolist(),
                         std=np.load(stats_dir / "target_std.npy").astype(float).tolist(),
                     )
                     # print("using standardized targets!")
-                    return dataset_class(target_transform=standardize_transform, **dataset_args)
+                    return dataset_class(target_transform=self.standardize_transform, **dataset_args)
                 
                 except TypeError as e:
                     print(e)
@@ -398,14 +398,14 @@ class Trainer(TrainerBase):
                 entity=self.cfg.wandb_group_name,
                 project=self.cfg.wandb_project_name,
                 # name=f"{self.cfg.dataset_name}/{self.cfg.model_config.name}",
-                tags=[self.cfg.dataset_name, self.model_module, self.cfg.model_config.name],
+                tags=[f"{self.cfg.dataset_name}/{self.cfg.data_root.name}", self.model_module, self.cfg.model_config.name],
                 group=self.cfg.dataset_name,
                 # sync_tensorboard=True, # TODO: Look into this
                 dir=self.save_path,
                 settings=wandb.Settings(api_key=self.cfg.wandb_key) if self.cfg.wandb_key else None,
                 
                 config = dict(
-                    dataset = self.cfg.dataset_name,
+                    dataset = f"{self.cfg.dataset_name}/{self.cfg.data_root.name}", # self.cfg.dataset_name,
                     task = self.cfg.task,
                     architecture = self.model_module,
                     model_name = self.cfg.model_config.name,
@@ -458,6 +458,8 @@ class Trainer(TrainerBase):
 
 
 """ 
+Out of date - written keys might not be accurate and info contains more keys now
+
 What self.info contans and when it is accessible for potential hooks:
 
 # Before epoch
