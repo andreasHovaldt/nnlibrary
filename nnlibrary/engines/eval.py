@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 import nnlibrary.utils.comm as comm
+from nnlibrary.utils.operations import Standardize
 
 
 
@@ -193,7 +194,7 @@ class ClassificationEvaluator(EvaluatorBase):
         return fig, ax
 
 
-
+from typing import Callable, Optional
 
 class RegressionEvaluator(EvaluatorBase):
     def __init__(
@@ -205,6 +206,7 @@ class RegressionEvaluator(EvaluatorBase):
         amp_dtype: torch.dtype,
         output_names: list[str] | None = None,  # Names for each output dimension
         detailed: bool = False,
+        inverse_transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
         
     ) -> None:
         super().__init__()
@@ -216,6 +218,7 @@ class RegressionEvaluator(EvaluatorBase):
         self.amp_dtype = amp_dtype
         self.output_names = output_names
         self.detailed = detailed
+        self.inverse_transform = inverse_transform
         
     
     def run_evaluation(self, model: nn.Module):
@@ -263,6 +266,11 @@ class RegressionEvaluator(EvaluatorBase):
         # Concatenate metrics once
         y_true = torch.cat(y_true_list, dim=0) if y_true_list else torch.empty(0, dtype=torch.float32)
         y_pred = torch.cat(y_pred_list, dim=0) if y_pred_list else torch.empty(0, dtype=torch.float32)
+        
+        # Inverse transform if provided
+        if self.inverse_transform is not None and y_true.numel() > 0:
+            y_true = self.inverse_transform(y_true)
+            y_pred = self.inverse_transform(y_pred)
 
         # Calculate metrics on original scale
         num_batches = max(len(self.dataloader), 1)
