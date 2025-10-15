@@ -306,7 +306,7 @@ class RegressionEvaluator(EvaluatorBase):
             result.update({
                 "y_true_seq": y_true,
                 "y_pred_seq": y_pred,
-                "prediction_plots": self._create_prediction_plots(y_true, y_pred),
+                "prediction_plots": self._create_prediction_plots(y_true, y_pred, draw_quantiles = False, draw_standard_deviation = True),
             })
         
         return result
@@ -343,7 +343,7 @@ class RegressionEvaluator(EvaluatorBase):
             return torch.tensor([torch.sqrt(torch.mean((y_true - y_pred) ** 2)).item()])
         return torch.sqrt(torch.mean((y_true - y_pred) ** 2, dim=0))
     
-    def _create_prediction_plots(self, y_true: torch.Tensor, y_pred: torch.Tensor):
+    def _create_prediction_plots(self, y_true: torch.Tensor, y_pred: torch.Tensor, draw_quantiles = False, draw_standard_deviation = False):
         """Create scatter plots comparing predictions vs ground truth"""
         import matplotlib.pyplot as plt
         
@@ -377,7 +377,7 @@ class RegressionEvaluator(EvaluatorBase):
             #  - 25% of points lie within ±q25
             #  - 50% of points lie within ±q50
             #  - 75% of points lie within ±q75
-            try:
+            if draw_quantiles:
                 abs_err = np.abs(y_pred_i - y_true_i)
                 q25, q50, q75 = np.quantile(abs_err, [0.25, 0.50, 0.75])
 
@@ -392,9 +392,25 @@ class RegressionEvaluator(EvaluatorBase):
                 draw_band(q25, color='#27ae60', label='±q25 (25%)')
                 draw_band(q50, color='#f39c12', label='±q50 (50%)')
                 draw_band(q75, color='#8e44ad', label='±q75 (75%)')
-            except Exception:
-                # If quantile computation fails, skip bands
-                pass
+            elif draw_standard_deviation:
+                # Draw standard deviation bands based on residuals r = y_pred - y_true
+                residuals = y_pred_i - y_true_i
+                std = residuals.std()
+
+                if std > 0:
+                    def draw_sigma(k: float, color: str, label: str | None = None, lw: float = 1.5):
+                        off = k * std
+                        # Upper: y = x + k*std, Lower: y = x - k*std
+                        ax_i.plot([min_val, max_val], [min_val + off, max_val + off], color=color, linestyle='-', linewidth=lw, alpha=0.85, label=label)
+                        ax_i.plot([min_val, max_val], [min_val - off, max_val - off], color=color, linestyle='-', linewidth=lw, alpha=0.85)
+
+                    # Use distinct colors; annotate approximate Gaussian coverage for intuition
+                    draw_sigma(1.0, color='#3498db', label='±1σ (~68%)')
+                    draw_sigma(2.0, color='#e67e22', label='±2σ (~95%)')
+                    draw_sigma(3.0, color='#c0392b', label='±3σ (~99.7%)')
+                else:
+                    # If std is zero, all points are on the line; no bands to draw
+                    pass
             
             ax_i.set_xlabel(f'True {name}')
             ax_i.set_ylabel(f'Predicted {name}')
