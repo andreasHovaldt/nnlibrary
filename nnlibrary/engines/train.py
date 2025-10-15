@@ -227,7 +227,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
 
 
-    def build_dataset(self, dataset_config: BaseConfig, standardize_target = False) -> Dataset:
+    def build_dataset(self, dataset_config: BaseConfig, standardize_target = False, normalize_target = False) -> Dataset:
         """Build dataset from configuration.
     
         Args:
@@ -244,43 +244,64 @@ class Trainer(TrainerBase):
         dataset_name = dataset_config.name
         dataset_args = dataset_config.args
         
+        # Make sure both standardization and normalization isn't enabled
+        assert not (standardize_target and normalize_target), "Cannot use both standardize_target and normalize_target at the same time"
+        
         # Get the dataset class from the datasets module
         if hasattr(nnlibrary.datasets, dataset_name):
             dataset_class = getattr(nnlibrary.datasets, dataset_name)
-            if not standardize_target:
+            if (not standardize_target) and (not normalize_target):
                 return dataset_class(**dataset_args)
             else:
                 stats_dir = self.cfg.data_root / "stats"
                 try:
-                    from nnlibrary.utils.operations import Standardize
                     import numpy as np
-                    self.standardize_transform = Standardize(
-                        mean=np.load(stats_dir / "target_mean.npy").astype(float).tolist(),
-                        std=np.load(stats_dir / "target_std.npy").astype(float).tolist(),
-                    )
-                    # print("using standardized targets!")
-                    return dataset_class(target_transform=self.standardize_transform, **dataset_args)
+                    if standardize_target:
+                        from nnlibrary.utils.operations import Standardize
+                        self.target_transform = Standardize(
+                            mean=np.load(stats_dir / "target_mean.npy").astype(float).tolist(),
+                            std=np.load(stats_dir / "target_std.npy").astype(float).tolist(),
+                        )
+                        print("Using standardized targets!")
+                    
+                    elif normalize_target:
+                        from nnlibrary.utils.operations import MinMaxNormalize
+                        self.target_transform = MinMaxNormalize(
+                            min_vals=np.load(stats_dir / "target_min.npy").astype(float).tolist(),
+                            max_vals=np.load(stats_dir / "target_max.npy").astype(float).tolist(),
+                        )
+                        print("Using normalized targets!")
+                    
+                    return dataset_class(target_transform=self.target_transform, **dataset_args)
                 
                 except TypeError as e:
                     print(e)
                     print(f"WARN: {e}!")
-                    if input("Try to continue without standardized targets? (y/n) ").lower() == 'y':
-                        print("Continuing without standardized targets...")
+                    if input("Try to continue without augmented targets? (y/n) ").lower() == 'y':
+                        print("Continuing without augmented targets...")
                         return dataset_class(**dataset_args)
                     else: exit()
                 
                 except FileNotFoundError as e:
                     print(f"WARN: {e}!")
-                    if input("Continue without standardized targets? (y/n) ").lower() == 'y':
-                        print("Continuing without standardized targets..")
+                    if input("Continue without augmented targets? (y/n) ").lower() == 'y':
+                        print("Continuing without augmented targets..")
                         return dataset_class(**dataset_args)
                     else: exit()
+                
+                except Exception as e:
+                    print(e)
+                    exit()
         else:
             raise ValueError(f"Dataset '{dataset_name}' not found in nnlibrary.datasets")
     
     
     def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader:
-        dataset: Dataset[Any] = self.build_dataset(dataset_config=dataloader_config.dataset, standardize_target=self.cfg.dataset.info.get("standardize_target", False))
+        dataset: Dataset[Any] = self.build_dataset(
+            dataset_config=dataloader_config.dataset, 
+            standardize_target=self.cfg.dataset.info.get("standardize_target", False),
+            normalize_target=self.cfg.dataset.info.get("normalize_target", False),
+        )
         
         # Gracefully support optional perf params even if not present in config
         if dataloader_config.num_workers: num_workers = dataloader_config.num_workers
@@ -394,6 +415,14 @@ class Trainer(TrainerBase):
     
     def build_wandb_run(self) -> wandb.Run | None:
         if self.cfg.enable_wandb and comm.is_main_process():
+            
+            if self.cfg.dataset.info.get("standardize_target", False):
+                target_transform = 'standardization'
+            elif self.cfg.dataset.info.get("normalize_target", False):
+                target_transform = 'normalization'
+            else:
+                target_transform = None
+            
             run = wandb.init(
                 entity=self.cfg.wandb_group_name,
                 project=self.cfg.wandb_project_name,
@@ -406,6 +435,7 @@ class Trainer(TrainerBase):
                 
                 config = dict(
                     dataset = f"{self.cfg.dataset_name}/{self.cfg.data_root.name}", # self.cfg.dataset_name,
+                    target_transform = target_transform,
                     task = self.cfg.task,
                     architecture = self.model_module,
                     model_name = self.cfg.model_config.name,

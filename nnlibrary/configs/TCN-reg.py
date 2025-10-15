@@ -13,7 +13,7 @@ from .__base__ import BaseConfig, DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset-regression"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset-regression-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
@@ -102,7 +102,8 @@ dataset.info = dict(
         "setpoint_heating_mpc_10001",
         "setpoint_cooling_mpc_10001",
     ],
-    standardize_target = True,
+    standardize_target = False,
+    normalize_target = True,
 )
 dataset.train = DataLoaderConfig(
     dataset = BaseConfig(
