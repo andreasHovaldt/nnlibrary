@@ -356,27 +356,51 @@ class RegressionEvaluator(EvaluatorBase):
         output_names = self.output_names if self.output_names else [f"Output {i}" for i in range(num_outputs)]
         
         # Create subplots for each output
-        fig, ax = plt.subplots(1, num_outputs, figsize=(6 * num_outputs, 5))
+        fig, axes = plt.subplots(1, num_outputs, figsize=(6 * num_outputs, 5))
         if num_outputs == 1:
-            ax = [ax]
+            axes = [axes]
         
-        for i, (ax, name) in enumerate(zip(ax, output_names)):
+        for i, (ax_i, name) in enumerate(zip(axes, output_names)):
             y_true_i = y_true[:, i].numpy()
             y_pred_i = y_pred[:, i].numpy()
             
             # Scatter plot
-            ax.scatter(y_true_i, y_pred_i, alpha=0.5, s=10)
+            ax_i.scatter(y_true_i, y_pred_i, alpha=0.5, s=10)
             
             # Perfect prediction line
             min_val = min(y_true_i.min(), y_pred_i.min())
             max_val = max(y_true_i.max(), y_pred_i.max())
-            ax.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction')
+            ax_i.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect prediction')
+
+            # Symmetric error-quantile bands around y = x
+            # Compute absolute residual quantiles so that:
+            #  - 25% of points lie within ±q25
+            #  - 50% of points lie within ±q50
+            #  - 75% of points lie within ±q75
+            try:
+                abs_err = np.abs(y_pred_i - y_true_i)
+                q25, q50, q75 = np.quantile(abs_err, [0.25, 0.50, 0.75])
+
+                # Helper to draw a band defined by offset q around y=x
+                def draw_band(q: float, color: str, label: str | None = None, lw: float = 1.5):
+                    # Upper: y = x + q, Lower: y = x - q
+                    ax_i.plot([min_val, max_val], [min_val + q, max_val + q], color=color, linestyle='-', linewidth=lw, alpha=0.85, label=label)
+                    ax_i.plot([min_val, max_val], [min_val - q, max_val - q], color=color, linestyle='-', linewidth=lw, alpha=0.85)
+
+                # Draw from inner to outer so outer lines don't hide inner ones
+                # Colors: inner=green, mid=orange, outer=purple (distinct from red perfect line)
+                draw_band(q25, color='#27ae60', label='±q25 (25%)')
+                draw_band(q50, color='#f39c12', label='±q50 (50%)')
+                draw_band(q75, color='#8e44ad', label='±q75 (75%)')
+            except Exception:
+                # If quantile computation fails, skip bands
+                pass
             
-            ax.set_xlabel(f'True {name}')
-            ax.set_ylabel(f'Predicted {name}')
-            ax.set_title(f'{name}: Predictions vs Ground Truth')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
+            ax_i.set_xlabel(f'True {name}')
+            ax_i.set_ylabel(f'Predicted {name}')
+            ax_i.set_title(f'{name}: Predictions vs Ground Truth')
+            ax_i.legend()
+            ax_i.grid(True, alpha=0.3)
         
         fig.tight_layout()
-        return fig, ax
+        return fig, axes
