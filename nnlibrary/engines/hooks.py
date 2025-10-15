@@ -4,11 +4,12 @@ import shutil
 import numpy as np
 import datetime as dt
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 import wandb
 import torch
 from nnlibrary.engines.eval import ClassificationEvaluator, RegressionEvaluator
 import nnlibrary.utils.comm as comm
+from nnlibrary.utils.operations import Standardize, MinMaxNormalize
 
 if TYPE_CHECKING:
     from .train import TrainerBase, Trainer
@@ -223,7 +224,7 @@ class ValidationHook(Hookbase):
                     
                     # Provide inverse-transform for calculating on original value ranges if available
                     inv_transform = None
-                    transform = getattr(self.trainer, 'standardize_transform', None)
+                    transform = getattr(self.trainer, 'target_transform', None)
                     if transform is not None and hasattr(transform, 'inverse_transform'):
                         inv_transform = transform.inverse_transform
                     
@@ -314,7 +315,7 @@ class TestHook(Hookbase):
                     
                     # Provide inverse-transform for calculating on original value ranges if available
                     inv_transform = None
-                    transform = getattr(self.trainer, 'standardize_transform', None)
+                    transform: Optional[Union[Standardize, MinMaxNormalize]] = getattr(self.trainer, 'target_transform', None)
                     if transform is not None and hasattr(transform, 'inverse_transform'):
                         inv_transform = transform.inverse_transform
                     
