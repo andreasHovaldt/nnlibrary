@@ -107,8 +107,8 @@ class TCN(nn.Module):
         logits = self.prediction_head(x)
         
         return logits
-        
-        
+
+
 class TCNRegression(TCN):
     def __init__(
         self, 
@@ -140,7 +140,37 @@ class TCNRegression(TCN):
         )
         self.prediction_head = regression_head
 
-    
+
+class TCNRegressionBounded(TCNRegression):
+    def __init__(
+        self, input_dim: int, 
+        sequence_length: int, 
+        num_classes: int, 
+        regression_head_hidden_dim: int, 
+        hidden_layer_sizes: list | None, 
+        kernel_size: int = 3, 
+        dropout: float = 0.3, 
+        dropout_type: str = "channel"
+    ) -> None:
+        super().__init__(
+            input_dim=input_dim, 
+            sequence_length=sequence_length, 
+            num_classes=num_classes, 
+            regression_head_hidden_dim=regression_head_hidden_dim, 
+            hidden_layer_sizes=hidden_layer_sizes, 
+            kernel_size=kernel_size, 
+            dropout=dropout, 
+            dropout_type=dropout_type,
+        )
+        
+        self.output_bounder = nn.Sigmoid()
+        
+        
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        raw_outputs = super().forward(input)
+        bounded_outputs = self.output_bounder(raw_outputs)
+        return bounded_outputs
+        
 
 class TCNResidualBlock(nn.Module):
     """
