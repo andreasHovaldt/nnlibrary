@@ -267,10 +267,10 @@ class RegressionEvaluator(EvaluatorBase):
         y_true = torch.cat(y_true_list, dim=0) if y_true_list else torch.empty(0, dtype=torch.float32)
         y_pred = torch.cat(y_pred_list, dim=0) if y_pred_list else torch.empty(0, dtype=torch.float32)
         
-        # Inverse transform if provided
-        if self.inverse_transform is not None and y_true.numel() > 0:
-            y_true = self.inverse_transform(y_true)
-            y_pred = self.inverse_transform(y_pred)
+        # # Inverse transform if provided - Removed again due to it making the aggregated metrics unfairly distributed, again features with higher values will affect MAE and RMSE more than others
+        # if self.inverse_transform is not None and y_true.numel() > 0:
+        #     y_true = self.inverse_transform(y_true)
+        #     y_pred = self.inverse_transform(y_pred)
 
         # Calculate metrics on original scale
         num_batches = max(len(self.dataloader), 1)
@@ -351,6 +351,11 @@ class RegressionEvaluator(EvaluatorBase):
         if y_true.dim() == 1:
             y_true = y_true.unsqueeze(1)
             y_pred = y_pred.unsqueeze(1)
+        
+        # Inverse transform if provided
+        if self.inverse_transform is not None and y_true.numel() > 0:
+            y_true = self.inverse_transform(y_true)
+            y_pred = self.inverse_transform(y_pred)
         
         num_outputs = y_true.shape[1]
         output_names = self.output_names if self.output_names else [f"Output {i}" for i in range(num_outputs)]
