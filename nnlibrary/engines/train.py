@@ -22,7 +22,6 @@ import nnlibrary.utils.comm as comm
 from .hooks import Hookbase
 
 from nnlibrary.configs import BaseConfig, DataLoaderConfig
-import nnlibrary.configs.HVACModeMLP as cfg_example
 
 
 AMP_DTYPES = {
@@ -117,7 +116,7 @@ class TrainerBase:
 
 
 class Trainer(TrainerBase):
-    def __init__(self, cfg: cfg_example) -> None: # type: ignore
+    def __init__(self, cfg) -> None: # type: ignore
         super().__init__()
         
         self.cfg = cfg
