@@ -136,6 +136,20 @@ class Trainer(TrainerBase):
         self.amp_dtype: torch.dtype = AMP_DTYPES[cfg.amp_dtype]
         
         self.model = self.build_model(cfg.model_config)
+        
+        # Set the batch sizes based on the config
+        #   This is done to here instead of directly in the config
+        #   to make it compatible with wandb sweeps, if you set 
+        #   the batch_size parameters directly in the config file, 
+        #   sweeps which change 'train_batch_size' or 'eval_batch_size' 
+        #   do not work as intended. 
+        if cfg.dataset.train.batch_size is None:
+            self.cfg.dataset.train.batch_size = cfg.train_batch_size
+        if cfg.dataset.val.batch_size is None:
+            self.cfg.dataset.val.batch_size = cfg.eval_batch_size
+        if cfg.dataset.test.batch_size is None:
+            self.cfg.dataset.test.batch_size = cfg.eval_batch_size
+        
         self.trainloader = self.build_dataloader(cfg.dataset.train)
         
         self.optimizer = self.build_optimizer(cfg.optimizer)
