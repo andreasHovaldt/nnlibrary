@@ -1,7 +1,11 @@
+# Add project root to Python path
+import sys
+from pathlib import Path
+#project_root = Path(__file__).parent.parent.parent.parent.resolve()
+#sys.path.insert(0, str(project_root))
+
 import os
 import wandb
-from pathlib import Path
-
 
 # Set wandb environment variable
 wandb_key = None
@@ -30,10 +34,6 @@ wandb.setup(wandb.Settings(reinit="create_new"))
 # It is important to handle the runs with the specific run object and not use the general wandb.log function
 
 
-# Helper to ensure directories exist for run artifacts
-def _ensure_dir(p: Path):
-    p.mkdir(parents=True, exist_ok=True)
-
 # 1: Define objective/training function
 def objective(config, run: wandb.Run):
     # Log to the active sweep run passed from main()
@@ -48,9 +48,15 @@ def objective(config, run: wandb.Run):
 
 def main():
     out_dir = (Path(__file__).parent / 'sweep').resolve()
-    _ensure_dir(out_dir)
+    
     # Important: For sweeps, the agent provides project/name; ignore custom project warnings
     run = wandb.init(dir=out_dir)
+    
+    print(run.config)
+    print(type(run.config))
+    for key, value in run.config.items():
+        print(f"{key}: {value}")
+    
     try:
         score = objective(run.config, run)
         run.log({"score": score})
@@ -66,13 +72,23 @@ sweep_configuration = {
         "x": {"max": 0.1, "min": 0.01},
         "y": {"values": [1, 3, 7]},
         "epochs": {"values": [5,]},
+        "loss_fn": {"values": [
+            dict(
+                name="MSELoss",
+                args=dict()
+            ),
+            dict(
+                name="MAELoss",
+                args=dict()
+            ),
+        ]}
     },
 }
 
 # 3: Start the sweep
 sweep_id = wandb.sweep(sweep=sweep_configuration, project="my-first-sweep")
 
-wandb.agent(sweep_id, function=main, count=10)
+wandb.agent(sweep_id, function=main, count=2)
 wandb.finish()
 
 
