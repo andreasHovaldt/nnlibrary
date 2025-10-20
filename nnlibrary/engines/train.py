@@ -50,10 +50,14 @@ class TrainerBase:
         self.scheduler: optim.lr_scheduler.LRScheduler
         self.loss_fn: nn.Module
         
+        # The writers are None if tensorboard or wandb is turned off, respectively
         self.tensorboard_writer: tensorboardX.SummaryWriter | None
-        self.wandb_run: wandb.Run | None # Basically the writer used for writing logs to wandb
+        self.wandb_run: wandb.Run | None
+        # Track ownership of the W&B run to avoid finishing a run we didn't create
+        self._wandb_run_owned = False
         
         # Dict used for passing around various runtime information
+        #  Mostly used by the hooks
         self.info = dict()
         
         
@@ -110,7 +114,8 @@ class TrainerBase:
             if self.tensorboard_writer:
                 self.tensorboard_writer.flush()
                 self.tensorboard_writer.close()
-            if self.wandb_run: 
+            # Only finish the W&B run if this trainer created/owns it
+            if self.wandb_run and getattr(self, "_wandb_run_owned", False):
                 self.wandb_run.finish()
     
 
@@ -421,7 +426,39 @@ class Trainer(TrainerBase):
                 target_transform = 'normalization'
             else:
                 target_transform = None
-            
+
+            # If an active W&B run already exists (e.g., created by a sweep script), reuse it
+            if wandb.run is not None:
+                self.logger.info("Reusing active Weights & Biases run (likely sweep-managed); will not re-initialize.")
+                self._wandb_run_owned = False
+
+                # Best-effort: update any missing config fields without overwriting sweep-controlled values
+                try:
+                    existing_cfg = wandb.run.config
+                    supplemental_cfg = dict(
+                        dataset=f"{self.cfg.dataset_name}/{self.cfg.data_root.name}",
+                        target_transform=target_transform,
+                        task=self.cfg.task,
+                        architecture=self.model_module,
+                        model_name=self.cfg.model_config.name,
+                        epochs=self.cfg.num_epochs,
+                        batch_size=self.cfg.train_batch_size,
+                        learning_rate=self.cfg.lr,
+                        loss_fn=self.cfg.loss_fn.name,
+                        optimizer=self.cfg.optimizer.name,
+                        scheduler=self.cfg.scheduler.name,
+                    )
+                    # Only include keys not present in the existing config
+                    missing = {k: v for k, v in supplemental_cfg.items() if k not in existing_cfg}
+                    if missing:
+                        existing_cfg.update(missing, allow_val_change=True)
+                except Exception as _:
+                    # Config update is best-effort; ignore if not supported
+                    pass
+
+                return wandb.run
+
+            # Otherwise, initialize a fresh run and mark ownership
             run = wandb.init(
                 entity=self.cfg.wandb_group_name,
                 project=self.cfg.wandb_project_name,
@@ -431,24 +468,21 @@ class Trainer(TrainerBase):
                 # sync_tensorboard=True, # TODO: Look into this
                 dir=self.save_path,
                 settings=wandb.Settings(api_key=self.cfg.wandb_key) if self.cfg.wandb_key else None,
-                
-                config = dict(
-                    dataset = f"{self.cfg.dataset_name}/{self.cfg.data_root.name}", # self.cfg.dataset_name,
-                    target_transform = target_transform,
-                    task = self.cfg.task,
-                    architecture = self.model_module,
-                    model_name = self.cfg.model_config.name,
-                    
-                    epochs = self.cfg.num_epochs,
-                    batch_size = self.cfg.train_batch_size,
-                    learning_rate = self.cfg.lr,
-                    
-                    loss_fn = self.cfg.loss_fn.name, # TODO: Look into logging the args as well
-                    optimizer = self.cfg.optimizer.name,
-                    scheduler = self.cfg.scheduler.name,
-                )
-                
+                config=dict(
+                    dataset=f"{self.cfg.dataset_name}/{self.cfg.data_root.name}",  # self.cfg.dataset_name,
+                    target_transform=target_transform,
+                    task=self.cfg.task,
+                    architecture=self.model_module,
+                    model_name=self.cfg.model_config.name,
+                    epochs=self.cfg.num_epochs,
+                    batch_size=self.cfg.train_batch_size,
+                    learning_rate=self.cfg.lr,
+                    loss_fn=self.cfg.loss_fn.name,  # TODO: Look into logging the args as well
+                    optimizer=self.cfg.optimizer.name,
+                    scheduler=self.cfg.scheduler.name,
+                ),
             )
+            self._wandb_run_owned = True
             return run
         else:
             return None
