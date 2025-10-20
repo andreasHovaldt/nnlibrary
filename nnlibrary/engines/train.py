@@ -6,7 +6,7 @@ import weakref
 import os
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, Dict
 
 import torch
 import torch.nn as nn
@@ -198,7 +198,7 @@ class Trainer(TrainerBase):
         return super().after_epoch()
 
 
-    def build_model(self, model_config: BaseConfig) -> nn.Module:
+    def build_model(self, model_config: Union[BaseConfig, Dict]) -> nn.Module:
         """Build model from configuration.
     
         Args:
@@ -212,8 +212,15 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If model class doesn't exist
         """
-        model_name = model_config.name
-        model_args = model_config.args
+        # Parse config
+        if type(model_config) == BaseConfig:
+            model_name = model_config.name
+            model_args = model_config.args
+        elif type(model_config) == Dict:
+            model_name = model_config["name"]
+            model_args = model_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(model_config)}")
         
         # Get the model class from the models module
         if hasattr(nnlibrary.models, model_name):
@@ -231,7 +238,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
 
 
-    def build_dataset(self, dataset_config: BaseConfig, standardize_target = False, normalize_target = False) -> Dataset:
+    def build_dataset(self, dataset_config: Union[BaseConfig, Dict], standardize_target = False, normalize_target = False) -> Dataset:
         """Build dataset from configuration.
     
         Args:
@@ -245,8 +252,15 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If dataset class doesn't exist
         """
-        dataset_name = dataset_config.name
-        dataset_args = dataset_config.args
+        # Parse config
+        if type(dataset_config) == BaseConfig:
+            dataset_name = dataset_config.name
+            dataset_args = dataset_config.args
+        elif type(dataset_config) == Dict:
+            dataset_name = dataset_config["name"]
+            dataset_args = dataset_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(dataset_config)}")
         
         # Make sure both standardization and normalization isn't enabled
         assert not (standardize_target and normalize_target), "Cannot use both standardize_target and normalize_target at the same time"
@@ -300,7 +314,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Dataset '{dataset_name}' not found in nnlibrary.datasets")
     
     
-    def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader:
+    def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader: # TODO: Make it able to accept a dict as config input
         dataset: Dataset[Any] = self.build_dataset(
             dataset_config=dataloader_config.dataset, 
             standardize_target=self.cfg.dataset.info.get("standardize_target", False),
@@ -323,7 +337,7 @@ class Trainer(TrainerBase):
         )
     
     
-    def build_optimizer(self, optimizer_config: BaseConfig) -> optim.Optimizer:
+    def build_optimizer(self, optimizer_config: Union[BaseConfig, Dict]) -> optim.Optimizer:
         """Build optimizer from configuration.
     
         Args:
@@ -337,8 +351,15 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If optimizer class doesn't exist
         """
-        optimizer_name = optimizer_config.name
-        optimizer_args = optimizer_config.args
+        # Parse config
+        if type(optimizer_config) == BaseConfig:
+            optimizer_name = optimizer_config.name
+            optimizer_args = optimizer_config.args
+        elif type(optimizer_config) == Dict:
+            optimizer_name = optimizer_config["name"]
+            optimizer_args = optimizer_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(optimizer_config)}")
         
         # Get the optimizer class from the optim module
         if hasattr(torch.optim, optimizer_name):
@@ -348,7 +369,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Optimizer '{optimizer_name}' not found in torch.optim")
         
     
-    def build_scheduler(self, scheduler: BaseConfig) -> optim.lr_scheduler.LRScheduler:
+    def build_scheduler(self, scheduler_config: Union[BaseConfig, Dict]) -> optim.lr_scheduler.LRScheduler:
         """Build scheduler from configuration.
     
         Args:
@@ -361,9 +382,17 @@ class Trainer(TrainerBase):
             
         Raises:
             ValueError: If scheduler class doesn't exist
-        """
-        scheduler_name = scheduler.name
-        scheduler_args = scheduler.args.copy()  # Copy to avoid modifying original
+        """ 
+        # Parse config
+        if type(scheduler_config) == BaseConfig:
+            scheduler_name = scheduler_config.name
+            scheduler_args = scheduler_config.args.copy() # Copy to avoid modifying original # TODO: wtf is this?
+        elif type(scheduler_config) == Dict:
+            scheduler_name = scheduler_config["name"]
+            scheduler_args = scheduler_config["args"].copy()
+        else:
+            raise ValueError(f"Config type is not supported: {type(scheduler_config)}")
+        
         
         # Get the scheduler class from the nnlibrary.utils.schedulers module
         if hasattr(nnlibrary.utils.schedulers, scheduler_name):
@@ -379,7 +408,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Scheduler '{scheduler_name}' not found")
 
     
-    def build_loss_fn(self, loss_fn: BaseConfig) -> nn.Module:
+    def build_loss_fn(self, loss_fn_config: Union[BaseConfig, Dict]) -> nn.Module:
         """Build loss function from configuration.
     
         Args:
@@ -393,8 +422,15 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If loss function class doesn't exist
         """
-        loss_fn_name = loss_fn.name
-        loss_fn_args = loss_fn.args
+        # Parse config
+        if type(loss_fn_config) == BaseConfig:
+            loss_fn_name = loss_fn_config.name
+            loss_fn_args = loss_fn_config.args
+        elif type(loss_fn_config) == Dict:
+            loss_fn_name = loss_fn_config["name"]
+            loss_fn_args = loss_fn_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(loss_fn_config)}")
         
         # First try nnlibrary.utils.loss for custom loss functions
         if hasattr(nnlibrary.utils.loss, loss_fn_name):
@@ -452,7 +488,8 @@ class Trainer(TrainerBase):
                     missing = {k: v for k, v in supplemental_cfg.items() if k not in existing_cfg}
                     if missing:
                         existing_cfg.update(missing, allow_val_change=True)
-                except Exception as _:
+                except Exception as e:
+                    print(f'Tried to update run info but failed: {e}')
                     # Config update is best-effort; ignore if not supported
                     pass
 
