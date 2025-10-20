@@ -49,9 +49,8 @@ def main():
     for key, value in run.config.items():
         if hasattr(cfg, key):
             setattr(cfg, key, value)
-            print(f"Attr {key} has been set for cfg!")
         else:
-            print(f"Attr {key} could not be set!")
+            print(f"Attr {key} could not be set, falling back to config default!")
     
     trainer = Trainer(cfg=cfg)
     trainer.train()
@@ -71,7 +70,6 @@ sweep_configuration = {
     "method": "grid",
     "metric": {"goal": "minimize", "name": "test/loss"},
     "parameters": {
-        "dataset_name": {"values": ["30days_2025-08-24_2025-09-23",]},
         "num_epochs": {"values": [5, 10]},
         "lr": {"values": [1e-2, 1e-3, 1e-4]},
         "train_batch_size": {"values": [256, 512, 1024]},
