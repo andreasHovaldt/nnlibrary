@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, asdict
-from typing import Any
+from typing import Any, Optional
 
 
 
@@ -19,7 +19,7 @@ class BaseConfig:
 @dataclass
 class DataLoaderConfig:
     dataset: Any
-    batch_size: int
     shuffle: bool = False
-    num_workers: int | None = None
-    pin_memory: bool | None = None
+    batch_size: Optional[int] = None # NOTE: DO NOT SET THIS OPTION MANUALLY IF YOU WANT TO DO WANDB SWEEPS, USE THE CONFIG ATTRIBUTES 'train_batch_size' AND 'eval_batch_size'.
+    num_workers: Optional[int] = None
+    pin_memory: Optional[bool] = None
