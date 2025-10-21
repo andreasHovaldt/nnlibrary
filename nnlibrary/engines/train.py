@@ -121,53 +121,65 @@ class TrainerBase:
 
 
 class Trainer(TrainerBase):
-    def __init__(self, cfg) -> None: # type: ignore
+    def __init__(self, cfg) -> None:
         super().__init__()
-        
-        self.cfg = cfg
-        
-        if isinstance(cfg.model_config, BaseConfig):
-            self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
-        elif isinstance(cfg.model_config, dict):
-            self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config['name']
-        else:
-            raise ValueError(f"Model config (model_config) type is not supported: {type(cfg.model_config)}")
+        self.cfg = self.parse_dict_configs(cfg) # Individual checks are still there in the build methods, since this conversion was added afterwards and the check doesn't destroy anything
+
+        self.save_path = Path().cwd().resolve() / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name
             
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
         self.logger: logging.Logger = logging.getLogger()
-        self.num_epochs: int = cfg.num_epochs
+        self.num_epochs: int = self.cfg.num_epochs
         
-        self.device: str = cfg.device
-        self.amp_enable: bool = cfg.amp_enable
-        self.amp_dtype: torch.dtype = AMP_DTYPES[cfg.amp_dtype]
+        self.device: str = self.cfg.device
+        self.amp_enable: bool = self.cfg.amp_enable
+        self.amp_dtype: torch.dtype = AMP_DTYPES[self.cfg.amp_dtype]
         
-        self.model = self.build_model(cfg.model_config)
+        self.model = self.build_model(self.cfg.model_config)
         
         # Set the batch sizes based on the config
-        #   This is done to here instead of directly in the config
+        #   This is done here instead of directly in the config
         #   to make it compatible with wandb sweeps, if you set 
         #   the batch_size parameters directly in the config file, 
-        #   sweeps which change 'train_batch_size' or 'eval_batch_size' 
-        #   do not work as intended. 
-        if cfg.dataset.train.batch_size is None:
-            self.cfg.dataset.train.batch_size = cfg.train_batch_size
-        if cfg.dataset.val.batch_size is None:
-            self.cfg.dataset.val.batch_size = cfg.eval_batch_size
-        if cfg.dataset.test.batch_size is None:
-            self.cfg.dataset.test.batch_size = cfg.eval_batch_size
+        #   sweeps which change 'train_batch_size' or 
+        #   'eval_batch_size' do not work as intended. 
+        if self.cfg.dataset.train.batch_size is None:
+            self.cfg.dataset.train.batch_size = self.cfg.train_batch_size
+        if self.cfg.dataset.val.batch_size is None:
+            self.cfg.dataset.val.batch_size = self.cfg.eval_batch_size
+        if self.cfg.dataset.test.batch_size is None:
+            self.cfg.dataset.test.batch_size = self.cfg.eval_batch_size
         
-        self.trainloader = self.build_dataloader(cfg.dataset.train)
+        self.trainloader = self.build_dataloader(self.cfg.dataset.train)
         
-        self.optimizer = self.build_optimizer(cfg.optimizer)
-        self.scheduler = self.build_scheduler(cfg.scheduler)
-        self.loss_fn = self.build_loss_fn(cfg.loss_fn)
+        self.optimizer = self.build_optimizer(self.cfg.optimizer)
+        self.scheduler = self.build_scheduler(self.cfg.scheduler)
+        self.loss_fn = self.build_loss_fn(self.cfg.loss_fn)
         
         self.tensorboard_writer = self.build_tensorboard_writer()
         self.wandb_run = self.build_wandb_run()
         
         # Dict used for passing around various runtime information
         self.info = dict()
+    
+    @staticmethod
+    def parse_dict_configs(cfg: Any):
+        """Converts some of the dict configs to BaseConfig"""
         
+        for attr_name in ['model_config', 'loss_fn', 'optimizer', 'scheduler']:
+            current_attr = getattr(cfg, attr_name)
+            if isinstance(current_attr, dict):
+                # Convert the attribute from dict to BaseConfig
+                setattr(cfg, attr_name, BaseConfig.from_dict(current_attr))
+
+        # Dataset special case
+        for split_name in ['train', 'val', 'test']:
+            if hasattr(cfg.dataset, split_name):
+                split_config = getattr(cfg.dataset, split_name)
+                if hasattr(split_config, 'dataset') and isinstance(split_config.dataset, dict):
+                    # Convret the dataset dict to BaseConfig 
+                    setattr(split_config, 'dataset', BaseConfig.from_dict(split_config.dataset))
+        return cfg
 
     def run_step(self):
         
