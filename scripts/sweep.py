@@ -8,7 +8,7 @@ from functools import partial
 from pathlib import Path
 
 # Set project root to repo root
-project_root = Path(__file__).cwd().parent.resolve()
+project_root = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(project_root))
 
 from nnlibrary.engines import Trainer
@@ -82,7 +82,10 @@ wandb.setup(wandb.Settings(reinit="create_new"))
 
 
 def sweeper_func(cfg):
-    out_dir: Path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
+    if isinstance(cfg.model_config, dict):
+        out_dir: Path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config['name']
+    else:
+        out_dir: Path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
     out_dir.mkdir(parents=True, exist_ok=True)
     
     run = wandb.init(dir=out_dir)

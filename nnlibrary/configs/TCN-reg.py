@@ -146,7 +146,7 @@ dataset.test = DataLoaderConfig(
 sweep_configuration = {
     "name": "sweep-demo",
     "method": "grid",
-    "metric": {"goal": "minimize", "name": "test/loss"},
+    "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {
         "num_epochs": {"values": [5, 10, 15, 20]},
         "lr": {"values": [1e-2, 1e-3, 1e-4]},

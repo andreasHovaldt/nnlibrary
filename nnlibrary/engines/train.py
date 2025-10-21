@@ -125,8 +125,14 @@ class Trainer(TrainerBase):
         super().__init__()
         
         self.cfg = cfg
-        self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
-                
+        
+        if isinstance(cfg.model_config, BaseConfig):
+            self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
+        elif isinstance(cfg.model_config, dict):
+            self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config['name']
+        else:
+            raise ValueError(f"Model config (model_config) type is not supported: {type(cfg.model_config)}")
+            
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
         self.logger: logging.Logger = logging.getLogger()
         self.num_epochs: int = cfg.num_epochs
@@ -227,10 +233,10 @@ class Trainer(TrainerBase):
             ValueError: If model class doesn't exist
         """
         # Parse config
-        if type(model_config) == BaseConfig:
+        if isinstance(model_config, BaseConfig):
             model_name = model_config.name
             model_args = model_config.args
-        elif type(model_config) == Dict:
+        elif isinstance(model_config, dict):
             model_name = model_config["name"]
             model_args = model_config["args"]
         else:
@@ -267,10 +273,10 @@ class Trainer(TrainerBase):
             ValueError: If dataset class doesn't exist
         """
         # Parse config
-        if type(dataset_config) == BaseConfig:
+        if isinstance(dataset_config, BaseConfig):
             dataset_name = dataset_config.name
             dataset_args = dataset_config.args
-        elif type(dataset_config) == Dict:
+        elif isinstance(dataset_config, dict):
             dataset_name = dataset_config["name"]
             dataset_args = dataset_config["args"]
         else:
@@ -366,10 +372,10 @@ class Trainer(TrainerBase):
             ValueError: If optimizer class doesn't exist
         """
         # Parse config
-        if type(optimizer_config) == BaseConfig:
+        if isinstance(optimizer_config, BaseConfig):
             optimizer_name = optimizer_config.name
             optimizer_args = optimizer_config.args
-        elif type(optimizer_config) == Dict:
+        elif isinstance(optimizer_config, dict):
             optimizer_name = optimizer_config["name"]
             optimizer_args = optimizer_config["args"]
         else:
@@ -398,10 +404,10 @@ class Trainer(TrainerBase):
             ValueError: If scheduler class doesn't exist
         """ 
         # Parse config
-        if type(scheduler_config) == BaseConfig:
+        if isinstance(scheduler_config, BaseConfig):
             scheduler_name = scheduler_config.name
             scheduler_args = scheduler_config.args.copy() # Copy to avoid modifying original # TODO: wtf is this?
-        elif type(scheduler_config) == Dict:
+        elif isinstance(scheduler_config, dict):
             scheduler_name = scheduler_config["name"]
             scheduler_args = scheduler_config["args"].copy()
         else:
@@ -437,10 +443,10 @@ class Trainer(TrainerBase):
             ValueError: If loss function class doesn't exist
         """
         # Parse config
-        if type(loss_fn_config) == BaseConfig:
+        if isinstance(loss_fn_config, BaseConfig):
             loss_fn_name = loss_fn_config.name
             loss_fn_args = loss_fn_config.args
-        elif type(loss_fn_config) == Dict:
+        elif isinstance(loss_fn_config, dict):
             loss_fn_name = loss_fn_config["name"]
             loss_fn_args = loss_fn_config["args"]
         else:
