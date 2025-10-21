@@ -510,8 +510,8 @@ class Trainer(TrainerBase):
                         architecture=self.model_module,
                         model_name=self.cfg.model_config.name,
                         epochs=self.cfg.num_epochs,
-                        batch_size=self.cfg.train_batch_size,
-                        learning_rate=self.cfg.lr,
+                        train_batch_size=self.cfg.train_batch_size,
+                        lr=self.cfg.lr,
                         loss_fn=self.cfg.loss_fn.name,
                         optimizer=self.cfg.optimizer.name,
                         scheduler=self.cfg.scheduler.name,
@@ -519,7 +519,7 @@ class Trainer(TrainerBase):
                     # Only include keys not present in the existing config
                     missing = {k: v for k, v in supplemental_cfg.items() if k not in existing_cfg}
                     if missing:
-                        existing_cfg.update(missing, allow_val_change=True)
+                        existing_cfg.update(missing, allow_val_change=False)
                 except Exception as e:
                     print(f'Tried to update run info but failed: {e}')
                     # Config update is best-effort; ignore if not supported
@@ -544,8 +544,8 @@ class Trainer(TrainerBase):
                     architecture=self.model_module,
                     model_name=self.cfg.model_config.name,
                     epochs=self.cfg.num_epochs,
-                    batch_size=self.cfg.train_batch_size,
-                    learning_rate=self.cfg.lr,
+                    train_batch_size=self.cfg.train_batch_size,
+                    lr=self.cfg.lr,
                     loss_fn=self.cfg.loss_fn.name,  # TODO: Look into logging the args as well
                     optimizer=self.cfg.optimizer.name,
                     scheduler=self.cfg.scheduler.name,
