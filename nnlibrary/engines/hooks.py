@@ -144,6 +144,9 @@ class WandbHook(Hookbase):
                                 }
                             )
                         
+                        elif key in ('y_true', 'y_pred'):
+                            continue
+                        
                         # Dump the remaining test metrics
                         else:
                             try:
