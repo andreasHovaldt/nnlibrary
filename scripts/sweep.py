@@ -124,5 +124,5 @@ if __name__ == "__main__":
     sweep_id = wandb.sweep(sweep=cfg.sweep_configuration, project=cfg.wandb_project_name)
     
     # Pass the function with arguments without executing it, via functools.partial
-    wandb.agent(sweep_id, function=partial(sweeper_func, cfg), count=18) # FIXME: How to automate the 'count' variable?
+    wandb.agent(sweep_id, function=partial(sweeper_func, cfg), count=cfg.sweep_runs) # FIXME: How to automate the 'count' variable?
     wandb.finish()
