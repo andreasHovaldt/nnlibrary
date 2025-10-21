@@ -75,6 +75,7 @@ else:
 
 
 # Ensure multiple runs inits are allowed for the current runtime
+# https://docs.wandb.ai/guides/runs/multiple-runs-per-process/
 wandb.setup(wandb.Settings(reinit="create_new"))
 # When a new wandb.init is run, a new run is created while still allowing to log data to previous runs
 # It is important to handle the runs with the specific run object and not use the general wandb.log function
@@ -121,8 +122,8 @@ if __name__ == "__main__":
         raise AttributeError("The loaded config did not contain a 'sweep_configuration' attribute, please define one for performing a hyperparameter sweep!")
     assert cfg.enable_wandb is True, "Please enable WandB in the config, the hyperparameter sweep depends on WandB integration"
     
-    sweep_id = wandb.sweep(sweep=cfg.sweep_configuration, project=cfg.wandb_project_name)
+    sweep_id = wandb.sweep(sweep=cfg.sweep_configuration, project=cfg.wandb_project_name + '-sweep')
     
     # Pass the function with arguments without executing it, via functools.partial
-    wandb.agent(sweep_id, function=partial(sweeper_func, cfg), count=cfg.sweep_runs) # FIXME: How to automate the 'count' variable?
+    wandb.agent(sweep_id, function=partial(sweeper_func, cfg))
     wandb.finish()

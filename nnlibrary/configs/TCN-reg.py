@@ -13,7 +13,7 @@ from .__base__ import DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset5-regression-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
@@ -144,12 +144,12 @@ dataset.test = DataLoaderConfig(
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "sweep-demo",
+    "name": "TCN-reg-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {
-        "num_epochs": {"values": [5, 10, 15, 20]},
+        "num_epochs": {"values": [5, 10, 15, 20, 30]},
         "lr": {"values": [1e-2, 1e-3, 1e-4]},
-        "train_batch_size": {"values": [256, 512, 1024]},
+        "train_batch_size": {"values": [256, 512, 1024, 2048]},
     },
 }
