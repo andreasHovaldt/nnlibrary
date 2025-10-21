@@ -2,7 +2,9 @@ import os
 import sys
 import wandb
 import importlib
+from functools import partial
 from pathlib import Path
+from .train import load_cfg
 
 project_root = Path(__file__).parent.parent.parent.parent.resolve()
 sys.path.insert(0, str(project_root))
@@ -34,15 +36,11 @@ else:
 wandb.setup(wandb.Settings(reinit="create_new"))
 # When a new wandb.init is run, a new run is created while still allowing to log data to previous runs
 # It is important to handle the runs with the specific run object and not use the general wandb.log function
+# On second thought, I dont actually know if it is needed, but it works with it so I wont change it :-)
 
 
-
-def main():
-    config_name = "TCN-reg"
-    cfg = importlib.import_module(f"nnlibrary.configs.{config_name}")
-    out_dir = (Path(__file__).parent / 'sweep').resolve()
-
-    # Important: For sweeps, the agent provides project/name; ignore custom project warnings
+def sweeper_func(cfg):
+    out_dir = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
     run = wandb.init(dir=out_dir)
     
     # Apply the curent sweep run settings to the config
@@ -60,25 +58,27 @@ def main():
             "test/loss": trainer.info["test_result"]["loss"]
         }
     )
-    
     run.finish()
 
 
-# 2: Define the search space
-sweep_configuration = {
-    "name": "sweep-demo",
-    "method": "grid",
-    "metric": {"goal": "minimize", "name": "test/loss"},
-    "parameters": {
-        "num_epochs": {"values": [5, 10]},
-        "lr": {"values": [1e-2, 1e-3, 1e-4]},
-        "train_batch_size": {"values": [256, 512, 1024]},
-    },
-}
+
 
 
 if __name__ == "__main__":
-    # 3: Start the sweep
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project="my-first-sweep")
-    wandb.agent(sweep_id, function=main, count=18)
+    if len(sys.argv) != 2:
+        print("Usage: python sweep.py <config_name>")
+        sys.exit(1)
+    config_name = str(sys.argv[1])
+    
+    cfg = load_cfg(config_name)
+    
+    # Assurances before trying to run sweep
+    if not hasattr(cfg, 'sweep_configuration'):
+        raise AttributeError("The loaded config did not contain a 'sweep_configuration' attribute, please define one for performing a hyperparameter sweep!")
+    assert cfg.enable_wandb is True, "Please enable WandB in the config, the hyperparameter sweep depends on WandB integration"
+    
+    sweep_id = wandb.sweep(sweep=cfg.sweep_configuration, project=cfg.wandb_project_name)
+    
+    # Pass the function with arguments without executing it, via functools.partial
+    wandb.agent(sweep_id, function=partial(sweeper_func, cfg), count=18) # FIXME: How to automate the 'count' variable?
     wandb.finish()

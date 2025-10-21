@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from nnlibrary.engines import hooks as h
 
 from .__default__ import *
-from .__base__ import BaseConfig, DataLoaderConfig
+from .__base__ import DataLoaderConfig
 
 
 
@@ -37,7 +37,7 @@ validation_metric_higher_is_better = False
 #############################################
 ### Model Config ############################
 #############################################
-model_config = BaseConfig(
+model_config = dict(
     name = "TCNRegression",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
@@ -56,7 +56,7 @@ model_config = BaseConfig(
 #############################################
 ### Loss function Config ####################
 #############################################
-loss_fn = BaseConfig(
+loss_fn = dict(
     name="MSELoss",
     args=dict()
 )
@@ -66,7 +66,7 @@ loss_fn = BaseConfig(
 #############################################
 ### Optimizer Config ########################
 #############################################
-optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
+optimizer = dict( # 'params' and 'lr' should not be passed in args
     name = "AdamW",
     args = dict(),
 )
@@ -76,7 +76,7 @@ optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
 #############################################
 ### Scheduler Config ########################
 #############################################
-scheduler = BaseConfig( # 'optimizer' should not be passed in args
+scheduler = dict( # 'optimizer' should not be passed in args
     name = "OneCycleLR",
     args=dict(
         pct_start = 0.1, # % of time used for warmup
@@ -105,7 +105,7 @@ dataset.info = dict(
     normalize_target = True,
 )
 dataset.train = DataLoaderConfig(
-    dataset = BaseConfig(
+    dataset = dict(
         name = "MpcDatasetHDF5",
         args = dict(
             hdf5_file = data_root / "train.h5",
@@ -117,7 +117,7 @@ dataset.train = DataLoaderConfig(
 )
 
 dataset.val = DataLoaderConfig(
-    dataset=BaseConfig(
+    dataset=dict(
         name="MpcDatasetHDF5",
         args=dict(
             hdf5_file = data_root / "val.h5",
@@ -129,7 +129,7 @@ dataset.val = DataLoaderConfig(
 )
 
 dataset.test = DataLoaderConfig(
-    dataset=BaseConfig(
+    dataset=dict(
         name="MpcDatasetHDF5",
         args=dict(
             hdf5_file = data_root / "test.h5",
@@ -139,3 +139,17 @@ dataset.test = DataLoaderConfig(
         )),
     shuffle=False,
 )
+
+
+# Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
+# Define the search space
+sweep_configuration = {
+    "name": "sweep-demo",
+    "method": "grid",
+    "metric": {"goal": "minimize", "name": "test/loss"},
+    "parameters": {
+        "num_epochs": {"values": [5, 10, 15, 20]},
+        "lr": {"values": [1e-2, 1e-3, 1e-4]},
+        "train_batch_size": {"values": [256, 512, 1024]},
+    },
+}
