@@ -2,14 +2,56 @@ import os
 import sys
 import wandb
 import importlib
+import importlib.util
+import pkgutil
 from functools import partial
 from pathlib import Path
-from .train import load_cfg
 
-project_root = Path(__file__).parent.parent.parent.parent.resolve()
+# Set project root to repo root
+project_root = Path(__file__).cwd().parent.resolve()
 sys.path.insert(0, str(project_root))
 
 from nnlibrary.engines import Trainer
+
+# Dont know why but I could import the function from train.py >:(
+def load_cfg(name: str):
+    """Load a config module by short name, dotted path, or file path.
+
+    Resolution order:
+      1) nnlibrary.configs.<name>
+      2) <name> as a dotted module path
+      3) file path under nnlibrary/configs (relative or absolute)
+    """
+    # 1) Try nnlibrary.configs.<name>
+    try:
+        return importlib.import_module(f"nnlibrary.configs.{name}")
+    except ModuleNotFoundError:
+        pass
+    # 2) Try dotted path directly
+    try:
+        return importlib.import_module(name)
+    except ModuleNotFoundError:
+        pass
+    # 3) Treat as file path relative to configs dir by default
+    cfg_path = Path(name)
+    if not cfg_path.is_absolute():
+        cfg_path = project_root / "nnlibrary" / "configs" / cfg_path
+    if cfg_path.suffix != ".py":
+        cfg_path = cfg_path.with_suffix(".py")
+    if cfg_path.exists():
+        spec = importlib.util.spec_from_file_location(cfg_path.stem, cfg_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # type: ignore[attr-defined]
+            return module
+    # If all else fails, list available configs
+    try:
+        configs_pkg = importlib.import_module("nnlibrary.configs")
+        available = [name for _, name, ispkg in pkgutil.iter_modules(configs_pkg.__path__) if not ispkg and not name.startswith("__")]
+    except Exception:
+        available = []
+    raise SystemExit(f"Config '{name}' not found. Available: {', '.join(available) if available else 'no configs discovered'}")
+
 
 # Set wandb environment variable
 wandb_key = None
@@ -40,7 +82,9 @@ wandb.setup(wandb.Settings(reinit="create_new"))
 
 
 def sweeper_func(cfg):
-    out_dir = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
+    out_dir: Path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
     run = wandb.init(dir=out_dir)
     
     # Apply the curent sweep run settings to the config
@@ -53,15 +97,12 @@ def sweeper_func(cfg):
     trainer = Trainer(cfg=cfg)
     trainer.train()
     
-    run.log(
-        data={
-            "test/loss": trainer.info["test_result"]["loss"]
-        }
-    )
+    # Sweep metrics
+    sweep_metrics = ['loss','mae', 'rmse', 'r2_score'] # FIXME: Make this accessible when calling the script, or make it defineable in the config being swept
+    sweep_log_dict = {metric_name: trainer.info["test_result"][metric_name] for metric_name in sweep_metrics}
+    
+    run.log(data=sweep_log_dict)
     run.finish()
-
-
-
 
 
 if __name__ == "__main__":
