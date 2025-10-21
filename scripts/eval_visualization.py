@@ -202,8 +202,8 @@ def run_eval_and_plot(cfg: Any, split: str = "test", interactive: bool = False) 
         result = evaluator.eval(model=model)
 
     # Plot predicted vs true over sample index (proxy for time)
-    y_true = result.get("y_true_seq")
-    y_pred = result.get("y_pred_seq")
+    y_true = result.get("y_true")
+    y_pred = result.get("y_pred")
     if y_true is None or y_pred is None:
         print("Detailed sequences not returned; nothing to plot.")
         return
