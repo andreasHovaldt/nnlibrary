@@ -4,14 +4,17 @@ import wandb
 import importlib
 import importlib.util
 import pkgutil
+import logging
+import argparse
 from functools import partial
 from pathlib import Path
+from typing import Optional
+from os import PathLike
 
-# Set project root to repo root
-project_root = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(project_root))
-
-from nnlibrary.engines import Trainer
+parser = argparse.ArgumentParser(description="Helper script used for running hyperparameter sweeps on a config file")
+parser.add_argument("-n", "--config-name", type=str, required=True, help="Name of config, either as shorthand 'TCN-reg', as dotted module 'nnlibrary.configs.TCN-reg' or as file path '~/nnlibrary/configs/TCN-reg.py'.")
+parser.add_argument("--logging", action="store_true", help="Whether to display logger prints.")
+parser.add_argument('--log-level', default='INFO', choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'], help="The logging level used if logging is enabled. Default: INFO")
 
 # Dont know why but I could import the function from train.py >:(
 def load_cfg(name: str):
@@ -54,32 +57,30 @@ def load_cfg(name: str):
 
 
 # Set wandb environment variable
-wandb_key = None
+def set_wandb_env_var(api_file: Optional[PathLike]):
+    wandb_key = None
 
-# If no key in config, try to read from .secrets/wandb file
-secrets_file = Path().cwd().resolve() / '.secrets' / 'wandb'
-if secrets_file.exists():
-    try:
-        wandb_key = secrets_file.read_text().strip()
-    except Exception as e:
-        print(f"Warning: Could not read WandB key from {secrets_file}: {e}")
-else:
-    print(f"Could not find the wandb secrets file at: '{secrets_file}'")
+    # If no key in config, try to read from .secrets/wandb file
+    if api_file:
+        secrets_file = Path(api_file).resolve()
+    else:
+        secrets_file = Path().cwd().resolve() / '.secrets' / 'wandb'
+    if secrets_file.exists():
+        try:
+            wandb_key = secrets_file.read_text().strip()
+        except Exception as e:
+            print(f"Warning: Could not read WandB key from {secrets_file}: {e}")
+    else:
+        print(f"Could not find the wandb secrets file at: '{secrets_file}'")
 
-# Set the environment variable if we found a key
-if wandb_key:
-    os.environ['WANDB_API_KEY'] = wandb_key
-    print("WandB API key loaded successfully")
-else:
-    print("No WandB API key found - WandB logging has been disabled")
-
-
-# Ensure multiple runs inits are allowed for the current runtime
-# https://docs.wandb.ai/guides/runs/multiple-runs-per-process/
-wandb.setup(wandb.Settings(reinit="create_new"))
-# When a new wandb.init is run, a new run is created while still allowing to log data to previous runs
-# It is important to handle the runs with the specific run object and not use the general wandb.log function
-# On second thought, I dont actually know if it is needed, but it works with it so I wont change it :-)
+    # Set the environment variable if we found a key
+    if wandb_key:
+        os.environ['WANDB_API_KEY'] = wandb_key
+        print("WandB API key loaded successfully")
+        return True
+    else:
+        print("No WandB API key found!")
+        return False
 
 
 def sweeper_func(cfg):
@@ -110,10 +111,32 @@ def sweeper_func(cfg):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python sweep.py <config_name>")
-        sys.exit(1)
-    config_name = str(sys.argv[1])
+    args = parser.parse_args()
+    if not set_wandb_env_var(api_file=None): exit()
+    
+    # Add repo root to path
+    project_root = Path(__file__).parent.parent.resolve()
+    sys.path.insert(0, str(project_root))
+
+    from nnlibrary.engines import Trainer
+    
+    # Ensure multiple runs inits are allowed for the current runtime
+    # https://docs.wandb.ai/guides/runs/multiple-runs-per-process/
+    wandb.setup(wandb.Settings(reinit="create_new"))
+    # When a new wandb.init is run, a new run is created while still allowing to log data to previous runs
+    # It is important to handle the runs with the specific run object and not use the general wandb.log function
+    # On second thought, I dont actually know if it is needed, but it works with it so I wont change it :-)
+    
+    if args.logging:
+        logger = logging.getLogger(__name__)
+        logging.basicConfig(
+            level=getattr(logging, args.log_level),
+            format='%(asctime)s | %(filename)s:%(funcName)s | %(levelname)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            stream=sys.stdout
+        )
+    
+    config_name = str(args.config_name)
     
     cfg = load_cfg(config_name)
     

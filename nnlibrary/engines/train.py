@@ -4,6 +4,8 @@ import logging
 import functools
 import weakref
 import os
+import random
+import numpy as np
 
 from pathlib import Path
 from typing import Any, Union, Dict
@@ -125,10 +127,13 @@ class Trainer(TrainerBase):
         super().__init__()
         self.cfg = self.parse_dict_configs(cfg) # Individual checks are still there in the build methods, since this conversion was added afterwards and the check doesn't destroy anything
 
+        # Seed everything early for reproducibility if configured
+        self._seed_everything(getattr(self.cfg, 'seed', None))
+
         self.save_path = Path().cwd().resolve() / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name
             
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
-        self.logger: logging.Logger = logging.getLogger()
+        self.logger: logging.Logger = logging.getLogger(__name__)
         self.num_epochs: int = self.cfg.num_epochs
         
         self.device: str = self.cfg.device
@@ -180,6 +185,45 @@ class Trainer(TrainerBase):
                     # Convret the dataset dict to BaseConfig 
                     setattr(split_config, 'dataset', BaseConfig.from_dict(split_config.dataset))
         return cfg
+
+    def _seed_everything(self, seed: int | None) -> None:
+        """Set seeds for Python, NumPy, and PyTorch. Enable deterministic behavior where possible.
+
+        Args:
+            seed: Integer seed or None to skip seeding.
+        """
+        if seed is None:
+            return
+        try:
+            os.environ["PYTHONHASHSEED"] = str(seed)
+        except Exception as e:
+            self.logger.info(f"Failed setting PYTHONHASHSEED environment variable: {e}")
+        try:
+            random.seed(seed)
+        except Exception as e:
+            self.logger.info(f"Failed setting seed for native python random variable generator: {e} ")
+        try:
+            np.random.seed(seed)
+        except Exception as e:
+            self.logger.info(f"Failed settomg seed fpr numpy rng: {e}")
+        try:
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+        except Exception as e:
+            self.logger.info(f"Failed setting torch random seed: {e}")
+        # Deterministic settings (may reduce performance)
+        try:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        except Exception as e:
+            self.logger.info(f"Failed setting cudnn backends to deterministic behavior: {e}")
+        # Optional: enforce deterministic algorithms where supported
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception as e:
+            # Not all environments or ops support full determinism
+            self.logger.info(f"Faile setting torch to use deterministic algorithms: {e}")
 
     def run_step(self):
         
@@ -354,18 +398,42 @@ class Trainer(TrainerBase):
         )
         
         # Gracefully support optional perf params even if not present in config
-        if dataloader_config.num_workers: num_workers = dataloader_config.num_workers
-        else: num_workers = max(1, (os.cpu_count() or 2) // 2)
+        if dataloader_config.num_workers: 
+            num_workers = dataloader_config.num_workers
+        else: 
+            num_workers = max(1, (os.cpu_count() or 2) // 2)
         
-        if dataloader_config.pin_memory: pin_memory = dataloader_config.pin_memory
-        else: pin_memory = (self.device == 'cuda')
+        if dataloader_config.pin_memory: 
+            pin_memory = dataloader_config.pin_memory
+        else: 
+            pin_memory = (self.cfg.device == 'cuda')
 
+        # Reproducible shuffling and per-worker seeding
+        generator = None
+        worker_init_fn = None
+        
+        seed = getattr(self.cfg, 'seed', None)
+        if seed is not None:
+            # DataLoader RNG for shuffling (only matters if shuffle=True)
+            generator = torch.Generator()
+            generator.manual_seed(int(seed))
+            
+            # Seed Python and NumPy in each worker deterministically
+            def _seed_worker(worker_id: int):
+                worker_seed = (torch.initial_seed() + worker_id) % 2**32
+                random.seed(worker_seed)
+                np.random.seed(worker_seed)
+            
+            worker_init_fn = _seed_worker
+        
         return DataLoader(
             dataset=dataset,
             batch_size=dataloader_config.batch_size,
             shuffle=dataloader_config.shuffle,
             num_workers=num_workers,
             pin_memory=pin_memory,
+            worker_init_fn=worker_init_fn,
+            generator=generator,
         )
     
     
