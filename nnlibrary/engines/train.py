@@ -24,12 +24,7 @@ import nnlibrary.utils.comm as comm
 from .hooks import Hookbase
 
 from nnlibrary.configs import BaseConfig, DataLoaderConfig
-
-
-AMP_DTYPES = {
-    "float16": torch.float16,
-    "bfloat16": torch.bfloat16,
-}
+from nnlibrary.utils.misc import REPO_ROOT, AMP_DTYPES, random_name_gen
 
 
 class TrainerBase:
@@ -125,14 +120,14 @@ class TrainerBase:
 class Trainer(TrainerBase):
     def __init__(self, cfg) -> None:
         super().__init__()
-        self.cfg = self.parse_dict_configs(cfg) # Individual checks are still there in the build methods, since this conversion was added afterwards and the check doesn't destroy anything
+        self.cfg = self._parse_dict_configs(cfg) # Individual checks are still there in the build methods, since this conversion was added afterwards and the check doesn't destroy anything
         self.logger: logging.Logger = logging.getLogger(__name__)
 
+        self.save_path = self._get_run_save_dir(root_dir = REPO_ROOT / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name)
+        
         # Seed everything early for reproducibility if configured
         self._seed_everything(getattr(self.cfg, 'seed', None))
-
-        self.save_path = Path().cwd().resolve() / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name
-            
+        
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
         self.num_epochs: int = self.cfg.num_epochs
         
@@ -174,7 +169,7 @@ class Trainer(TrainerBase):
         self.info = dict()
     
     @staticmethod
-    def parse_dict_configs(cfg: Any):
+    def _parse_dict_configs(cfg: Any):
         """Converts some of the dict configs to BaseConfig"""
         
         for attr_name in ['model_config', 'loss_fn', 'optimizer', 'scheduler']:
@@ -191,6 +186,14 @@ class Trainer(TrainerBase):
                     # Convret the dataset dict to BaseConfig 
                     setattr(split_config, 'dataset', BaseConfig.from_dict(split_config.dataset))
         return cfg
+    
+    @staticmethod
+    def _get_run_save_dir(root_dir: Path) -> Path:
+        root_dir.mkdir(parents=True, exist_ok=True)
+        run_number = len(list(root_dir.iterdir())) + 1
+        run_name = random_name_gen()
+        return root_dir / f"{run_name}-{run_number}"
+    
 
     def _seed_everything(self, seed: int | None) -> None:
         """Set seeds for Python, NumPy, and PyTorch. Enable deterministic behavior where possible.
@@ -587,7 +590,7 @@ class Trainer(TrainerBase):
 
             # If an active W&B run already exists (e.g., created by a sweep script), reuse it
             if wandb.run is not None:
-                self.logger.info("Reusing active Weights & Biases run (likely sweep-managed); will not re-initialize.")
+                self.logger.info("Reusing active WandB run (likely sweep-managed); will not re-initialize.")
                 self._wandb_run_owned = False
 
                 # Best-effort: update any missing config fields without overwriting sweep-controlled values
@@ -618,7 +621,9 @@ class Trainer(TrainerBase):
                 return wandb.run
 
             # Otherwise, initialize a fresh run and mark ownership
+            self.logger.info("Initializing a new WandB run!")
             run = wandb.init(
+                name=self.save_path.name,
                 entity=self.cfg.wandb_group_name,
                 project=self.cfg.wandb_project_name,
                 # name=f"{self.cfg.dataset_name}/{self.cfg.model_config.name}",

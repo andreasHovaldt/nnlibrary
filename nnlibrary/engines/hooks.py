@@ -604,7 +604,7 @@ class SaveTrainingRun(Hookbase):
             cfg = self.trainer.cfg
             timestamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
             run_name = f"{cfg.model_config.name}_{timestamp}"
-            self.save_path = Path(cfg.save_path / run_name)
+            #self.save_path = Path(cfg.save_path / run_name) this already exists
             # TODO: save shiez
             
         raise NotImplementedError
