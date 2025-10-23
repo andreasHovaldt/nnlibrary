@@ -126,6 +126,7 @@ class Trainer(TrainerBase):
     def __init__(self, cfg) -> None:
         super().__init__()
         self.cfg = self.parse_dict_configs(cfg) # Individual checks are still there in the build methods, since this conversion was added afterwards and the check doesn't destroy anything
+        self.logger: logging.Logger = logging.getLogger(__name__)
 
         # Seed everything early for reproducibility if configured
         self._seed_everything(getattr(self.cfg, 'seed', None))
@@ -133,7 +134,6 @@ class Trainer(TrainerBase):
         self.save_path = Path().cwd().resolve() / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name
             
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
-        self.logger: logging.Logger = logging.getLogger(__name__)
         self.num_epochs: int = self.cfg.num_epochs
         
         self.device: str = self.cfg.device
@@ -141,6 +141,7 @@ class Trainer(TrainerBase):
         self.amp_dtype: torch.dtype = AMP_DTYPES[self.cfg.amp_dtype]
         
         self.model = self.build_model(self.cfg.model_config)
+        self.logger.debug("Successfully built model!")
         
         # Set the batch sizes based on the config
         #   This is done here instead of directly in the config
@@ -156,13 +157,18 @@ class Trainer(TrainerBase):
             self.cfg.dataset.test.batch_size = self.cfg.eval_batch_size
         
         self.trainloader = self.build_dataloader(self.cfg.dataset.train)
+        self.logger.debug("Successfully built trainloader!")
         
         self.optimizer = self.build_optimizer(self.cfg.optimizer)
+        self.logger.debug("Successfully built optimizer!")
         self.scheduler = self.build_scheduler(self.cfg.scheduler)
+        self.logger.debug("Successfully built scheduler!")
         self.loss_fn = self.build_loss_fn(self.cfg.loss_fn)
+        self.logger.debug("Successfully built loss function!")
         
         self.tensorboard_writer = self.build_tensorboard_writer()
         self.wandb_run = self.build_wandb_run()
+        if self.wandb_run is not None: self.logger.info(f"WandB logging dir: {self.wandb_run.dir}")
         
         # Dict used for passing around various runtime information
         self.info = dict()
@@ -206,7 +212,9 @@ class Trainer(TrainerBase):
             Performance impact: Deterministic mode may be 10-50% slower depending on operations.
         """
         if seed is None:
+            self.logger.debug("No seed was provided. The following run is non deterministic!")
             return
+        self.logger.info(f"A seed was provided ({seed}), setting random seeds and deterministic behaviour!")
         try:
             os.environ["PYTHONHASHSEED"] = str(seed)
         except Exception as e:
@@ -665,6 +673,7 @@ class Trainer(TrainerBase):
             # Assign weak proxy to avoid circular reference
             hook_instance.trainer = weakref.proxy(self)
             hooks.append(hook_instance)
+            self.logger.debug(f"Successfully registered hook: {hook_instance}")
         
         return hooks
     
