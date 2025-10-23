@@ -83,14 +83,23 @@ def set_wandb_env_var(api_file: Optional[PathLike]):
         return False
 
 
-def sweeper_func(cfg):
-    if isinstance(cfg.model_config, dict):
-        out_dir: Path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config['name']
-    else:
-        out_dir: Path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
-    out_dir.mkdir(parents=True, exist_ok=True)
+def get_run_save_dir(root_dir: Path) -> Path:
+    root_dir.mkdir(parents=True, exist_ok=True)
+    run_number = len(list(root_dir.iterdir()))
+    run_name = random_name_gen(prefix='sweep')
+    return root_dir / f"{run_name}-{run_number}"
+
+
+def sweeper_func(cfg, sweep_root):
+
+    save_dir = get_run_save_dir(root_dir=sweep_root)
+    try:
+        save_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as e:
+        print(f"Run directory already exists! Terminating execution to ensure data is not overwritten...")
+        exit()
     
-    run = wandb.init(dir=out_dir)
+    run = wandb.init(name=save_dir.name, dir=save_dir)
     
     # Apply the curent sweep run settings to the config
     for key, value in run.config.items():
@@ -117,15 +126,9 @@ if __name__ == "__main__":
     # Add repo root to path
     project_root = Path(__file__).parent.parent.resolve()
     sys.path.insert(0, str(project_root))
-
     from nnlibrary.engines import Trainer
-    
-    # Ensure multiple runs inits are allowed for the current runtime
-    # https://docs.wandb.ai/guides/runs/multiple-runs-per-process/
-    wandb.setup(wandb.Settings(reinit="create_new"))
-    # When a new wandb.init is run, a new run is created while still allowing to log data to previous runs
-    # It is important to handle the runs with the specific run object and not use the general wandb.log function
-    # On second thought, I dont actually know if it is needed, but it works with it so I wont change it :-)
+    from nnlibrary.utils.misc import random_name_gen, REPO_ROOT
+    from nnlibrary.configs.__base__ import BaseConfig
     
     if args.logging:
         logger = logging.getLogger(__name__)
@@ -135,18 +138,57 @@ if __name__ == "__main__":
             datefmt='%Y-%m-%d %H:%M:%S',
             stream=sys.stdout
         )
+    else: 
+        logger = None 
     
     config_name = str(args.config_name)
     
     cfg = load_cfg(config_name)
+    
     
     # Assurances before trying to run sweep
     if not hasattr(cfg, 'sweep_configuration'):
         raise AttributeError("The loaded config did not contain a 'sweep_configuration' attribute, please define one for performing a hyperparameter sweep!")
     assert cfg.enable_wandb is True, "Please enable WandB in the config, the hyperparameter sweep depends on WandB integration"
     
+    if getattr(cfg, 'seed') is None:
+        print("Seed has not been set, this is recommended for hyperparameter sweeps to remove randomness between the runs.")
+        if input("Do you want to continue the sweep without a set seed? y/n: ").lower() not in ['y', 'yes']:
+            print("Terminating sweep...")
+            exit()
+        print("Continuing sweep...")
+            
+
+    
     sweep_id = wandb.sweep(sweep=cfg.sweep_configuration, project=cfg.wandb_project_name + '-sweep')
+
+    # Create sweep root save dir 
+    if isinstance(cfg.model_config, dict):
+        model_config = BaseConfig.from_dict(cfg.model_config)
+    else:
+        model_config = cfg.model_config
+    sweep_save_root: Path = REPO_ROOT / cfg.save_path / cfg.dataset_name / model_config.name / 'sweeps' / cfg.sweep_configuration["name"]
+    
+    try:
+        sweep_save_root.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        if args.logging and (logger is not None): 
+            logger.warning(f"Sweep exists at: '{sweep_save_root}', falling back to saving using sweep id as identifier!")
+        sweep_save_root = sweep_save_root.parent / sweep_id
+        sweep_save_root.mkdir(parents=True, exist_ok=False)
+    finally:
+        if args.logging and (logger is not None): 
+            logger.info(f"Saving the sweep runs to: '{sweep_save_root}'")
+    
+    # Ensure W&B uses the sweep root for any agent/sweep metadata (defaults to ./wandb otherwise)
+    # This affects files like ./wandb/sweep-<id>/config-<id>.yaml which would otherwise be created at CWD.
+    os.environ['WANDB_DIR'] = str(sweep_save_root)
+
+    # Now allow multiple run inits for this process and finalize W&B setup
+    # https://docs.wandb.ai/guides/runs/multiple-runs-per-process/
+    wandb.setup(wandb.Settings(reinit="create_new"))
+    
     
     # Pass the function with arguments without executing it, via functools.partial
-    wandb.agent(sweep_id, function=partial(sweeper_func, cfg))
+    wandb.agent(sweep_id, function=partial(sweeper_func, cfg, sweep_save_root))
     wandb.finish()

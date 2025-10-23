@@ -125,6 +125,17 @@ class Trainer(TrainerBase):
 
         self.save_path = self._get_run_save_dir(root_dir = REPO_ROOT / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name)
         
+        # If a sweep/agent has already created a W&B run with a specific directory,
+        # use that directory as this trainer's save root to keep all artifacts together.
+        # Otherwise, create a fresh unique run directory.
+        if wandb.run is not None:
+            self.save_path = Path(wandb.run.dir)
+            # Mark as not owned here as we didn't initialize it
+            self._wandb_run_owned = False
+            self.logger.info(f"Detected active WandB run; using sweep directory for outputs")
+        else:
+            self.save_path = self._get_run_save_dir(root_dir = REPO_ROOT / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name)
+        
         # Seed everything early for reproducibility if configured
         self._seed_everything(getattr(self.cfg, 'seed', None))
         
