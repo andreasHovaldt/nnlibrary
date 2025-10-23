@@ -1,6 +1,7 @@
 import random
 import torch
 from pathlib import Path
+from typing import Optional, Union, List
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 
@@ -131,7 +132,19 @@ NOUN_LIST = [
 ]
 
 
-def random_name_gen(word_seperator: str = '-') -> str:
+def random_name_gen(word_seperator: str = '-', prefix: Optional[str] = None, suffix: Optional[str] = None) -> str:
     adjective = ADJECTIVE_LIST[random.randint(0, len(ADJECTIVE_LIST) - 1)]
     noun = NOUN_LIST[random.randint(0, len(NOUN_LIST) - 1)]
     return adjective + word_seperator + noun
+
+def random_adjective(n: int = 1) -> Union[str, List[str]]:
+    if n == 1:
+        return ADJECTIVE_LIST[random.randint(0, len(ADJECTIVE_LIST) - 1)]
+    else:
+        return [ADJECTIVE_LIST[random.randint(0, len(ADJECTIVE_LIST) - 1)] for _ in range(n)]
+    
+def random_noun(n: int = 1) -> Union[str, List[str]]:
+    if n == 1:
+        return NOUN_LIST[random.randint(0, len(NOUN_LIST) - 1)]
+    else:
+        return [NOUN_LIST[random.randint(0, len(NOUN_LIST) - 1)] for _ in range(n)]
