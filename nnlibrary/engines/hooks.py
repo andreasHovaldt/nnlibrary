@@ -350,7 +350,7 @@ class TestHook(Hookbase):
             
             print(f"Final test result:")
             for key, value in result.items():
-                if key in ("confusion_matrix", "prediction_plots", "y_true_seq", "y_pred_seq"):
+                if key in ("confusion_matrix", "prediction_plots", "y_true", "y_pred"):
                     continue
                 try:
                     print(f"   {key}: {float(value):.4f}")
