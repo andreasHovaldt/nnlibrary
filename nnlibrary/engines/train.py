@@ -191,6 +191,19 @@ class Trainer(TrainerBase):
 
         Args:
             seed: Integer seed or None to skip seeding.
+        
+        Note:
+            Deterministic behavior guarantees bit-wise reproducibility ONLY when:
+            - Using the same PyTorch, CUDA, and cuBLAS versions
+            - Running on GPUs with identical architecture and SM count
+            - Using the same random seed
+            
+            Results may differ across:
+            - Different CUDA toolkit versions
+            - Different GPU models (even same generation)
+            - CPU vs GPU execution
+            
+            Performance impact: Deterministic mode may be 10-50% slower depending on operations.
         """
         if seed is None:
             return
@@ -221,6 +234,7 @@ class Trainer(TrainerBase):
         # Optional: enforce deterministic algorithms where supported
         try:
             torch.use_deterministic_algorithms(True, warn_only=True)
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
         except Exception as e:
             # Not all environments or ops support full determinism
             self.logger.info(f"Faile setting torch to use deterministic algorithms: {e}")
