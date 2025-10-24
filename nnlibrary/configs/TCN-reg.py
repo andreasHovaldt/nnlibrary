@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from nnlibrary.engines import hooks as h
 
 from .__default__ import *
-from .__base__ import BaseConfig, DataLoaderConfig
+from .__base__ import DataLoaderConfig
 
 
 
@@ -13,7 +13,7 @@ from .__base__ import BaseConfig, DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset5-regression-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
@@ -28,8 +28,9 @@ lr = 1e-3
 validation_metric_name = "loss"
 validation_metric_higher_is_better = False
 
+seed = 42
+
 # TODO CONFIGS
-# seed = None
 # weight = None should be a path to a pretrained params dict
 
 
@@ -37,7 +38,7 @@ validation_metric_higher_is_better = False
 #############################################
 ### Model Config ############################
 #############################################
-model_config = BaseConfig(
+model_config = dict(
     name = "TCNRegression",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
@@ -56,7 +57,7 @@ model_config = BaseConfig(
 #############################################
 ### Loss function Config ####################
 #############################################
-loss_fn = BaseConfig(
+loss_fn = dict(
     name="MSELoss",
     args=dict()
 )
@@ -66,7 +67,7 @@ loss_fn = BaseConfig(
 #############################################
 ### Optimizer Config ########################
 #############################################
-optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
+optimizer = dict( # 'params' and 'lr' should not be passed in args
     name = "AdamW",
     args = dict(),
 )
@@ -76,11 +77,10 @@ optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
 #############################################
 ### Scheduler Config ########################
 #############################################
-scheduler = BaseConfig( # 'optimizer' should not be passed in args
+scheduler = dict( # 'optimizer' should not be passed in args
     name = "OneCycleLR",
     args=dict(
         pct_start = 0.1, # % of time used for warmup
-        max_lr = lr,
         anneal_strategy = "cos",
         div_factor = 1e1, # 10.0,
         final_div_factor = 1e3, # 1000.0,
@@ -106,7 +106,7 @@ dataset.info = dict(
     normalize_target = True,
 )
 dataset.train = DataLoaderConfig(
-    dataset = BaseConfig(
+    dataset = dict(
         name = "MpcDatasetHDF5",
         args = dict(
             hdf5_file = data_root / "train.h5",
@@ -114,12 +114,11 @@ dataset.train = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size = train_batch_size,
     shuffle = True,
 )
 
 dataset.val = DataLoaderConfig(
-    dataset=BaseConfig(
+    dataset=dict(
         name="MpcDatasetHDF5",
         args=dict(
             hdf5_file = data_root / "val.h5",
@@ -127,12 +126,11 @@ dataset.val = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size=eval_batch_size,
     shuffle=False,
 )
 
 dataset.test = DataLoaderConfig(
-    dataset=BaseConfig(
+    dataset=dict(
         name="MpcDatasetHDF5",
         args=dict(
             hdf5_file = data_root / "test.h5",
@@ -140,6 +138,19 @@ dataset.test = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size=eval_batch_size,
     shuffle=False,
 )
+
+
+# Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
+# Define the search space
+sweep_configuration = {
+    "name": "TCN-reg-sweep",
+    "method": "grid",
+    "metric": {"goal": "minimize", "name": "loss"},
+    "parameters": {
+        "num_epochs": {"values": [5, 10, 15, 20, 30]},
+        "lr": {"values": [1e-2, 1e-3, 1e-4]},
+        "train_batch_size": {"values": [256, 512, 1024, 2048]},
+    },
+}
