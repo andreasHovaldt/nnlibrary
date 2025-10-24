@@ -161,10 +161,9 @@ def build_dataloader(cfg: Any, dataloader_cfg: Any) -> torch.utils.data.DataLoad
     prefetch_factor = getattr(dataloader_cfg, 'prefetch_factor', 2 if num_workers else None)
 
     # Resolve batch size like Trainer (fall back to cfg.eval_batch_size)
-    batch_size = getattr(dataloader_cfg, 'batch_size', None)
-    if batch_size is None and hasattr(cfg, 'eval_batch_size'):
-        batch_size = int(cfg.eval_batch_size)
-    elif batch_size is None:
+    if hasattr(cfg, 'eval_batch_size'):
+        batch_size = cfg.eval_batch_size
+    else:
         batch_size = 512
 
     kwargs = dict(
@@ -227,13 +226,10 @@ def run_eval_and_plot(cfg: Any, run_name: str, split: str = "test", interactive:
     # Choose split
     if split == 'test':
         dataloader_cfg = cfg.dataset.test
-        detailed = True
     elif split == 'val':
         dataloader_cfg = cfg.dataset.val
-        detailed = True
     elif split == 'train':
         dataloader_cfg = cfg.dataset.train
-        detailed = True
     else:
         raise SystemExit("--split must be 'test', 'val' or 'train'")
 
@@ -273,7 +269,7 @@ def run_eval_and_plot(cfg: Any, run_name: str, split: str = "test", interactive:
             amp_enable=amp_enable,
             amp_dtype=amp_dtype,
             class_names=class_names,
-            detailed=detailed,
+            detailed=True,
         )
         with torch.inference_mode():
             result = evaluator.eval(model=model)

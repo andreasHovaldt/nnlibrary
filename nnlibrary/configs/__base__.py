@@ -20,7 +20,6 @@ class BaseConfig:
 class DataLoaderConfig:
     dataset: Any
     shuffle: bool = False
-    batch_size: Optional[int] = None # NOTE: DO NOT SET THIS OPTION MANUALLY IF YOU WANT TO DO WANDB SWEEPS, USE THE CONFIG ATTRIBUTES 'train_batch_size' AND 'eval_batch_size'.
     num_workers: Optional[int] = None
     pin_memory: Optional[bool] = None
     

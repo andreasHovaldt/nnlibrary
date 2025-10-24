@@ -149,20 +149,7 @@ class Trainer(TrainerBase):
         self.model = self.build_model(self.cfg.model_config)
         self.logger.debug("Successfully built model!")
         
-        # Set the batch sizes based on the config
-        #   This is done here instead of directly in the config
-        #   to make it compatible with wandb sweeps, if you set 
-        #   the batch_size parameters directly in the config file, 
-        #   sweeps which change 'train_batch_size' or 
-        #   'eval_batch_size' do not work as intended. 
-        if self.cfg.dataset.train.batch_size is None:
-            self.cfg.dataset.train.batch_size = self.cfg.train_batch_size
-        if self.cfg.dataset.val.batch_size is None:
-            self.cfg.dataset.val.batch_size = self.cfg.eval_batch_size
-        if self.cfg.dataset.test.batch_size is None:
-            self.cfg.dataset.test.batch_size = self.cfg.eval_batch_size
-        
-        self.trainloader = self.build_dataloader(self.cfg.dataset.train)
+        self.trainloader = self.build_dataloader(self.cfg.dataset.train, batch_size=self.cfg.train_batch_size)
         self.logger.debug("Successfully built trainloader!")
         
         self.optimizer = self.build_optimizer(self.cfg.optimizer)
@@ -432,7 +419,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Dataset '{dataset_name}' not found in nnlibrary.datasets")
     
     
-    def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader: # TODO: Make it able to accept a dict as config input
+    def build_dataloader(self, dataloader_config: DataLoaderConfig, batch_size: int) -> DataLoader: # TODO: Make it able to accept a dict as config input
         dataset: Dataset[Any] = self.build_dataset(
             dataset_config=dataloader_config.dataset, 
             standardize_target=self.cfg.dataset.info.get("standardize_target", False),
@@ -471,9 +458,11 @@ class Trainer(TrainerBase):
             
             worker_init_fn = _seed_worker
         
+        self.logger.debug(f"Created dataloader using the following params:\n  batch_size={batch_size}\n  shuffle={dataloader_config.shuffle}\n  num_workers={num_workers}\n  pin_memory={pin_memory}")
+        
         return DataLoader(
             dataset=dataset,
-            batch_size=dataloader_config.batch_size,
+            batch_size=batch_size,
             shuffle=dataloader_config.shuffle,
             num_workers=num_workers,
             pin_memory=pin_memory,

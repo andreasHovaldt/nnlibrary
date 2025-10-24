@@ -91,7 +91,8 @@ def get_run_save_dir(root_dir: Path) -> Path:
     return root_dir / f"{run_name}-{run_number}"
 
 
-def sweeper_func(cfg, sweep_root):
+def sweeper_func(config_name: str, sweep_root: Path):
+    cfg = load_cfg(config_name)
 
     save_dir = get_run_save_dir(root_dir=sweep_root)
     try:
@@ -134,7 +135,8 @@ if __name__ == "__main__":
     from nnlibrary.configs.__base__ import BaseConfig
     
     if args.logging:
-        logging.getLogger('matplotlib').setLevel(logging.INFO)
+        logging.getLogger('matplotlib').setLevel(logging.INFO) # Supress matplib debug logging
+        logging.getLogger('urllib3').setLevel(logging.INFO) # Supress urllib3 (connectionpool logs) debug logging
         logger = logging.getLogger(__name__)
         logging.basicConfig(
             level=getattr(logging, args.log_level),
@@ -194,5 +196,5 @@ if __name__ == "__main__":
     
     
     # Pass the function with arguments without executing it, via functools.partial
-    wandb.agent(sweep_id, function=partial(sweeper_func, cfg, sweep_save_root))
+    wandb.agent(sweep_id, function=partial(sweeper_func, config_name, sweep_save_root))
     wandb.finish()
