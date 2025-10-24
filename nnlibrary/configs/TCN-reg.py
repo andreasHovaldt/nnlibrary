@@ -28,8 +28,9 @@ lr = 1e-3
 validation_metric_name = "loss"
 validation_metric_higher_is_better = False
 
+seed = 42
+
 # TODO CONFIGS
-# seed = None
 # weight = None should be a path to a pretrained params dict
 
 

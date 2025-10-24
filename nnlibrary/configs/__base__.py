@@ -23,3 +23,10 @@ class DataLoaderConfig:
     batch_size: Optional[int] = None # NOTE: DO NOT SET THIS OPTION MANUALLY IF YOU WANT TO DO WANDB SWEEPS, USE THE CONFIG ATTRIBUTES 'train_batch_size' AND 'eval_batch_size'.
     num_workers: Optional[int] = None
     pin_memory: Optional[bool] = None
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DataLoaderConfig':
+        return cls(**data)
+    
+    def to_dict(self) -> dict:
+        return asdict(self)

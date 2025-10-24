@@ -131,20 +131,35 @@ NOUN_LIST = [
     'wombat', 'woodpecker', 'wren', 'wyvern', 'yak', 'zenith', 'zephyr', 'zebra'
 ]
 
+# Use a system-level RNG for naming to avoid being affected by global random.seed()
+# This ensures sweep runs with fixed seeds don't repeat the same generated names.
+_SYS_RNG = random.SystemRandom()
+
 
 def random_name_gen(word_seperator: str = '-', prefix: Optional[str] = None, suffix: Optional[str] = None) -> str:
-    adjective = ADJECTIVE_LIST[random.randint(0, len(ADJECTIVE_LIST) - 1)]
-    noun = NOUN_LIST[random.randint(0, len(NOUN_LIST) - 1)]
-    return adjective + word_seperator + noun
+    if suffix == 'sweep':
+        adjective = _SYS_RNG.choice(ADJECTIVE_LIST)
+        return adjective + word_seperator + suffix
+    
+    adjective = _SYS_RNG.choice(ADJECTIVE_LIST)
+    noun = _SYS_RNG.choice(NOUN_LIST)
+    name = adjective + word_seperator + noun
+    
+    if prefix:
+        name = prefix + word_seperator + name
+    if suffix:
+        name = name + word_seperator + suffix
+        
+    return name
 
 def random_adjective(n: int = 1) -> Union[str, List[str]]:
     if n == 1:
-        return ADJECTIVE_LIST[random.randint(0, len(ADJECTIVE_LIST) - 1)]
+        return _SYS_RNG.choice(ADJECTIVE_LIST)
     else:
-        return [ADJECTIVE_LIST[random.randint(0, len(ADJECTIVE_LIST) - 1)] for _ in range(n)]
+        return [_SYS_RNG.choice(ADJECTIVE_LIST) for _ in range(n)]
     
 def random_noun(n: int = 1) -> Union[str, List[str]]:
     if n == 1:
-        return NOUN_LIST[random.randint(0, len(NOUN_LIST) - 1)]
+        return _SYS_RNG.choice(NOUN_LIST)
     else:
-        return [NOUN_LIST[random.randint(0, len(NOUN_LIST) - 1)] for _ in range(n)]
+        return [_SYS_RNG.choice(NOUN_LIST) for _ in range(n)]

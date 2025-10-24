@@ -129,7 +129,7 @@ class Trainer(TrainerBase):
         # use that directory as this trainer's save root to keep all artifacts together.
         # Otherwise, create a fresh unique run directory.
         if wandb.run is not None:
-            self.save_path = Path(wandb.run.dir)
+            self.save_path = Path(wandb.run.dir).parent.parent.parent # run.dir -> ./sweep-energetic-lake-1/wandb/run-20251024_123520-uawx30y1/files/
             # Mark as not owned here as we didn't initialize it
             self._wandb_run_owned = False
             self.logger.info(f"Detected active WandB run; using sweep directory for outputs")
@@ -334,6 +334,9 @@ class Trainer(TrainerBase):
         else:
             raise ValueError(f"Config type is not supported: {type(model_config)}")
         
+        # Log the config
+        self.logger.debug(f"Building model with following config:\n  name: {model_name}\n  args: {model_args}")
+        
         # Get the model class from the models module
         if hasattr(nnlibrary.models, model_name):
             model_class = getattr(nnlibrary.models, model_name)
@@ -373,6 +376,9 @@ class Trainer(TrainerBase):
             dataset_args = dataset_config["args"]
         else:
             raise ValueError(f"Config type is not supported: {type(dataset_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building dataset with following config:\n  name: {dataset_name}\n  args: {dataset_args}")
         
         # Make sure both standardization and normalization isn't enabled
         assert not (standardize_target and normalize_target), "Cannot use both standardize_target and normalize_target at the same time"
@@ -432,6 +438,9 @@ class Trainer(TrainerBase):
             standardize_target=self.cfg.dataset.info.get("standardize_target", False),
             normalize_target=self.cfg.dataset.info.get("normalize_target", False),
         )
+        
+        # Log the config
+        self.logger.debug(f"Building dataloader with following config:\n  {dataloader_config.to_dict()}")
         
         # Gracefully support optional perf params even if not present in config
         if dataloader_config.num_workers: 
@@ -497,6 +506,9 @@ class Trainer(TrainerBase):
         else:
             raise ValueError(f"Config type is not supported: {type(optimizer_config)}")
         
+        # Log the config
+        self.logger.debug(f"Building optimizer with following config:\n  name: {optimizer_name}\n  args: {optimizer_args}")
+        
         # Get the optimizer class from the optim module
         if hasattr(torch.optim, optimizer_name):
             optimizer_class = getattr(torch.optim, optimizer_name)
@@ -529,6 +541,8 @@ class Trainer(TrainerBase):
         else:
             raise ValueError(f"Config type is not supported: {type(scheduler_config)}")
         
+        # Log the config
+        self.logger.debug(f"Building scheduler with following config:\n  name: {scheduler_name}\n  args: {scheduler_args}")
         
         # Get the scheduler class from the nnlibrary.utils.schedulers module
         if hasattr(nnlibrary.utils.schedulers, scheduler_name):
@@ -567,6 +581,9 @@ class Trainer(TrainerBase):
             loss_fn_args = loss_fn_config["args"]
         else:
             raise ValueError(f"Config type is not supported: {type(loss_fn_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building dataset with following config:\n  name: {loss_fn_name}\n  args: {loss_fn_args}")
         
         # First try nnlibrary.utils.loss for custom loss functions
         if hasattr(nnlibrary.utils.loss, loss_fn_name):
