@@ -4,9 +4,11 @@ import logging
 import functools
 import weakref
 import os
+import random
+import numpy as np
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, Dict
 
 import torch
 import torch.nn as nn
@@ -22,12 +24,7 @@ import nnlibrary.utils.comm as comm
 from .hooks import Hookbase
 
 from nnlibrary.configs import BaseConfig, DataLoaderConfig
-
-
-AMP_DTYPES = {
-    "float16": torch.float16,
-    "bfloat16": torch.bfloat16,
-}
+from nnlibrary.utils.misc import REPO_ROOT, AMP_DTYPES, random_name_gen
 
 
 class TrainerBase:
@@ -50,10 +47,14 @@ class TrainerBase:
         self.scheduler: optim.lr_scheduler.LRScheduler
         self.loss_fn: nn.Module
         
+        # The writers are None if tensorboard or wandb is turned off, respectively
         self.tensorboard_writer: tensorboardX.SummaryWriter | None
-        self.wandb_run: wandb.Run | None # Basically the writer used for writing logs to wandb
+        self.wandb_run: wandb.Run | None
+        # Track ownership of the W&B run to avoid finishing a run we didn't create
+        self._wandb_run_owned = False
         
         # Dict used for passing around various runtime information
+        #  Mostly used by the hooks
         self.info = dict()
         
         
@@ -110,39 +111,142 @@ class TrainerBase:
             if self.tensorboard_writer:
                 self.tensorboard_writer.flush()
                 self.tensorboard_writer.close()
-            if self.wandb_run: 
+            # Only finish the W&B run if this trainer created/owns it
+            if self.wandb_run and getattr(self, "_wandb_run_owned", False):
                 self.wandb_run.finish()
     
 
 
 class Trainer(TrainerBase):
-    def __init__(self, cfg) -> None: # type: ignore
+    def __init__(self, cfg) -> None:
         super().__init__()
+        self.cfg = self._parse_dict_configs(cfg) # Individual checks are still there in the build methods, since this conversion was added afterwards and the check doesn't destroy anything
+        self.logger: logging.Logger = logging.getLogger(__name__)
+
+        self.save_path = self._get_run_save_dir(root_dir = REPO_ROOT / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name)
         
-        self.cfg = cfg
-        self.save_path = Path().cwd().resolve() / cfg.save_path / cfg.dataset_name / cfg.model_config.name
-                
+        # If a sweep/agent has already created a W&B run with a specific directory,
+        # use that directory as this trainer's save root to keep all artifacts together.
+        # Otherwise, create a fresh unique run directory.
+        if wandb.run is not None:
+            self.save_path = Path(wandb.run.dir).parent.parent.parent # run.dir -> ./sweep-energetic-lake-1/wandb/run-20251024_123520-uawx30y1/files/
+            # Mark as not owned here as we didn't initialize it
+            self._wandb_run_owned = False
+            self.logger.info(f"Detected active WandB run; using sweep directory for outputs")
+        else:
+            self.save_path = self._get_run_save_dir(root_dir = REPO_ROOT / self.cfg.save_path / self.cfg.dataset_name / self.cfg.model_config.name)
+        
+        # Seed everything early for reproducibility if configured
+        self._seed_everything(getattr(self.cfg, 'seed', None))
+        
         self.hooks: list[Hookbase] = self.register_hooks() # Initialize hooks and pass self to them
-        self.logger: logging.Logger = logging.getLogger()
-        self.num_epochs: int = cfg.num_epochs
+        self.num_epochs: int = self.cfg.num_epochs
         
-        self.device: str = cfg.device
-        self.amp_enable: bool = cfg.amp_enable
-        self.amp_dtype: torch.dtype = AMP_DTYPES[cfg.amp_dtype]
+        self.device: str = self.cfg.device
+        self.amp_enable: bool = self.cfg.amp_enable
+        self.amp_dtype: torch.dtype = AMP_DTYPES[self.cfg.amp_dtype]
         
-        self.model = self.build_model(cfg.model_config)
-        self.trainloader = self.build_dataloader(cfg.dataset.train)
+        self.model = self.build_model(self.cfg.model_config)
+        self.logger.debug("Successfully built model!")
         
-        self.optimizer = self.build_optimizer(cfg.optimizer)
-        self.scheduler = self.build_scheduler(cfg.scheduler)
-        self.loss_fn = self.build_loss_fn(cfg.loss_fn)
+        self.trainloader = self.build_dataloader(self.cfg.dataset.train, batch_size=self.cfg.train_batch_size)
+        self.logger.debug("Successfully built trainloader!")
+        
+        self.optimizer = self.build_optimizer(self.cfg.optimizer)
+        self.logger.debug("Successfully built optimizer!")
+        self.scheduler = self.build_scheduler(self.cfg.scheduler)
+        self.logger.debug("Successfully built scheduler!")
+        self.loss_fn = self.build_loss_fn(self.cfg.loss_fn)
+        self.logger.debug("Successfully built loss function!")
         
         self.tensorboard_writer = self.build_tensorboard_writer()
         self.wandb_run = self.build_wandb_run()
+        if self.wandb_run is not None: self.logger.info(f"WandB logging dir: {self.wandb_run.dir}")
         
         # Dict used for passing around various runtime information
         self.info = dict()
+    
+    @staticmethod
+    def _parse_dict_configs(cfg: Any):
+        """Converts some of the dict configs to BaseConfig"""
         
+        for attr_name in ['model_config', 'loss_fn', 'optimizer', 'scheduler']:
+            current_attr = getattr(cfg, attr_name)
+            if isinstance(current_attr, dict):
+                # Convert the attribute from dict to BaseConfig
+                setattr(cfg, attr_name, BaseConfig.from_dict(current_attr))
+
+        # Dataset special case
+        for split_name in ['train', 'val', 'test']:
+            if hasattr(cfg.dataset, split_name):
+                split_config = getattr(cfg.dataset, split_name)
+                if hasattr(split_config, 'dataset') and isinstance(split_config.dataset, dict):
+                    # Convret the dataset dict to BaseConfig 
+                    setattr(split_config, 'dataset', BaseConfig.from_dict(split_config.dataset))
+        return cfg
+    
+    @staticmethod
+    def _get_run_save_dir(root_dir: Path) -> Path:
+        root_dir.mkdir(parents=True, exist_ok=True)
+        run_number = len(list(root_dir.iterdir())) + 1
+        run_name = random_name_gen()
+        return root_dir / f"{run_name}-{run_number}"
+    
+
+    def _seed_everything(self, seed: int | None) -> None:
+        """Set seeds for Python, NumPy, and PyTorch. Enable deterministic behavior where possible.
+
+        Args:
+            seed: Integer seed or None to skip seeding.
+        
+        Note:
+            Deterministic behavior guarantees bit-wise reproducibility ONLY when:
+            - Using the same PyTorch, CUDA, and cuBLAS versions
+            - Running on GPUs with identical architecture and SM count
+            - Using the same random seed
+            
+            Results may differ across:
+            - Different CUDA toolkit versions
+            - Different GPU models (even same generation)
+            - CPU vs GPU execution
+            
+            Performance impact: Deterministic mode may be 10-50% slower depending on operations.
+        """
+        if seed is None:
+            self.logger.debug("No seed was provided. The following run is non deterministic!")
+            return
+        self.logger.info(f"A seed was provided ({seed}), setting random seeds and deterministic behaviour!")
+        try:
+            os.environ["PYTHONHASHSEED"] = str(seed)
+        except Exception as e:
+            self.logger.info(f"Failed setting PYTHONHASHSEED environment variable: {e}")
+        try:
+            random.seed(seed)
+        except Exception as e:
+            self.logger.info(f"Failed setting seed for native python random variable generator: {e} ")
+        try:
+            np.random.seed(seed)
+        except Exception as e:
+            self.logger.info(f"Failed settomg seed fpr numpy rng: {e}")
+        try:
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+        except Exception as e:
+            self.logger.info(f"Failed setting torch random seed: {e}")
+        # Deterministic settings (may reduce performance)
+        try:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        except Exception as e:
+            self.logger.info(f"Failed setting cudnn backends to deterministic behavior: {e}")
+        # Optional: enforce deterministic algorithms where supported
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+        except Exception as e:
+            # Not all environments or ops support full determinism
+            self.logger.info(f"Faile setting torch to use deterministic algorithms: {e}")
 
     def run_step(self):
         
@@ -193,7 +297,7 @@ class Trainer(TrainerBase):
         return super().after_epoch()
 
 
-    def build_model(self, model_config: BaseConfig) -> nn.Module:
+    def build_model(self, model_config: Union[BaseConfig, Dict]) -> nn.Module:
         """Build model from configuration.
     
         Args:
@@ -207,8 +311,18 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If model class doesn't exist
         """
-        model_name = model_config.name
-        model_args = model_config.args
+        # Parse config
+        if isinstance(model_config, BaseConfig):
+            model_name = model_config.name
+            model_args = model_config.args
+        elif isinstance(model_config, dict):
+            model_name = model_config["name"]
+            model_args = model_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(model_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building model with following config:\n  name: {model_name}\n  args: {model_args}")
         
         # Get the model class from the models module
         if hasattr(nnlibrary.models, model_name):
@@ -226,7 +340,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
 
 
-    def build_dataset(self, dataset_config: BaseConfig, standardize_target = False, normalize_target = False) -> Dataset:
+    def build_dataset(self, dataset_config: Union[BaseConfig, Dict], standardize_target = False, normalize_target = False) -> Dataset:
         """Build dataset from configuration.
     
         Args:
@@ -240,8 +354,18 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If dataset class doesn't exist
         """
-        dataset_name = dataset_config.name
-        dataset_args = dataset_config.args
+        # Parse config
+        if isinstance(dataset_config, BaseConfig):
+            dataset_name = dataset_config.name
+            dataset_args = dataset_config.args
+        elif isinstance(dataset_config, dict):
+            dataset_name = dataset_config["name"]
+            dataset_args = dataset_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(dataset_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building dataset with following config:\n  name: {dataset_name}\n  args: {dataset_args}")
         
         # Make sure both standardization and normalization isn't enabled
         assert not (standardize_target and normalize_target), "Cannot use both standardize_target and normalize_target at the same time"
@@ -295,30 +419,59 @@ class Trainer(TrainerBase):
             raise ValueError(f"Dataset '{dataset_name}' not found in nnlibrary.datasets")
     
     
-    def build_dataloader(self, dataloader_config: DataLoaderConfig) -> DataLoader:
+    def build_dataloader(self, dataloader_config: DataLoaderConfig, batch_size: int) -> DataLoader: # TODO: Make it able to accept a dict as config input
         dataset: Dataset[Any] = self.build_dataset(
             dataset_config=dataloader_config.dataset, 
             standardize_target=self.cfg.dataset.info.get("standardize_target", False),
             normalize_target=self.cfg.dataset.info.get("normalize_target", False),
         )
         
-        # Gracefully support optional perf params even if not present in config
-        if dataloader_config.num_workers: num_workers = dataloader_config.num_workers
-        else: num_workers = max(1, (os.cpu_count() or 2) // 2)
+        # Log the config
+        self.logger.debug(f"Building dataloader with following config:\n  {dataloader_config.to_dict()}")
         
-        if dataloader_config.pin_memory: pin_memory = dataloader_config.pin_memory
-        else: pin_memory = (self.device == 'cuda')
+        # Gracefully support optional perf params even if not present in config
+        if dataloader_config.num_workers: 
+            num_workers = dataloader_config.num_workers
+        else: 
+            num_workers = max(1, (os.cpu_count() or 2) // 2)
+        
+        if dataloader_config.pin_memory: 
+            pin_memory = dataloader_config.pin_memory
+        else: 
+            pin_memory = (self.cfg.device == 'cuda')
 
+        # Reproducible shuffling and per-worker seeding
+        generator = None
+        worker_init_fn = None
+        
+        seed = getattr(self.cfg, 'seed', None)
+        if seed is not None:
+            # DataLoader RNG for shuffling (only matters if shuffle=True)
+            generator = torch.Generator()
+            generator.manual_seed(int(seed))
+            
+            # Seed Python and NumPy in each worker deterministically
+            def _seed_worker(worker_id: int):
+                worker_seed = (torch.initial_seed() + worker_id) % 2**32
+                random.seed(worker_seed)
+                np.random.seed(worker_seed)
+            
+            worker_init_fn = _seed_worker
+        
+        self.logger.debug(f"Created dataloader using the following params:\n  batch_size={batch_size}\n  shuffle={dataloader_config.shuffle}\n  num_workers={num_workers}\n  pin_memory={pin_memory}")
+        
         return DataLoader(
             dataset=dataset,
-            batch_size=dataloader_config.batch_size,
+            batch_size=batch_size,
             shuffle=dataloader_config.shuffle,
             num_workers=num_workers,
             pin_memory=pin_memory,
+            worker_init_fn=worker_init_fn,
+            generator=generator,
         )
     
     
-    def build_optimizer(self, optimizer_config: BaseConfig) -> optim.Optimizer:
+    def build_optimizer(self, optimizer_config: Union[BaseConfig, Dict]) -> optim.Optimizer:
         """Build optimizer from configuration.
     
         Args:
@@ -332,8 +485,18 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If optimizer class doesn't exist
         """
-        optimizer_name = optimizer_config.name
-        optimizer_args = optimizer_config.args
+        # Parse config
+        if isinstance(optimizer_config, BaseConfig):
+            optimizer_name = optimizer_config.name
+            optimizer_args = optimizer_config.args
+        elif isinstance(optimizer_config, dict):
+            optimizer_name = optimizer_config["name"]
+            optimizer_args = optimizer_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(optimizer_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building optimizer with following config:\n  name: {optimizer_name}\n  args: {optimizer_args}")
         
         # Get the optimizer class from the optim module
         if hasattr(torch.optim, optimizer_name):
@@ -343,7 +506,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Optimizer '{optimizer_name}' not found in torch.optim")
         
     
-    def build_scheduler(self, scheduler: BaseConfig) -> optim.lr_scheduler.LRScheduler:
+    def build_scheduler(self, scheduler_config: Union[BaseConfig, Dict]) -> optim.lr_scheduler.LRScheduler:
         """Build scheduler from configuration.
     
         Args:
@@ -356,9 +519,19 @@ class Trainer(TrainerBase):
             
         Raises:
             ValueError: If scheduler class doesn't exist
-        """
-        scheduler_name = scheduler.name
-        scheduler_args = scheduler.args.copy()  # Copy to avoid modifying original
+        """ 
+        # Parse config
+        if isinstance(scheduler_config, BaseConfig):
+            scheduler_name = scheduler_config.name
+            scheduler_args = scheduler_config.args.copy() # Copy to avoid modifying original # TODO: wtf is this?
+        elif isinstance(scheduler_config, dict):
+            scheduler_name = scheduler_config["name"]
+            scheduler_args = scheduler_config["args"].copy()
+        else:
+            raise ValueError(f"Config type is not supported: {type(scheduler_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building scheduler with following config:\n  name: {scheduler_name}\n  args: {scheduler_args}")
         
         # Get the scheduler class from the nnlibrary.utils.schedulers module
         if hasattr(nnlibrary.utils.schedulers, scheduler_name):
@@ -374,7 +547,7 @@ class Trainer(TrainerBase):
             raise ValueError(f"Scheduler '{scheduler_name}' not found")
 
     
-    def build_loss_fn(self, loss_fn: BaseConfig) -> nn.Module:
+    def build_loss_fn(self, loss_fn_config: Union[BaseConfig, Dict]) -> nn.Module:
         """Build loss function from configuration.
     
         Args:
@@ -388,8 +561,18 @@ class Trainer(TrainerBase):
         Raises:
             ValueError: If loss function class doesn't exist
         """
-        loss_fn_name = loss_fn.name
-        loss_fn_args = loss_fn.args
+        # Parse config
+        if isinstance(loss_fn_config, BaseConfig):
+            loss_fn_name = loss_fn_config.name
+            loss_fn_args = loss_fn_config.args
+        elif isinstance(loss_fn_config, dict):
+            loss_fn_name = loss_fn_config["name"]
+            loss_fn_args = loss_fn_config["args"]
+        else:
+            raise ValueError(f"Config type is not supported: {type(loss_fn_config)}")
+        
+        # Log the config
+        self.logger.debug(f"Building dataset with following config:\n  name: {loss_fn_name}\n  args: {loss_fn_args}")
         
         # First try nnlibrary.utils.loss for custom loss functions
         if hasattr(nnlibrary.utils.loss, loss_fn_name):
@@ -421,8 +604,43 @@ class Trainer(TrainerBase):
                 target_transform = 'normalization'
             else:
                 target_transform = None
-            
+
+            # If an active W&B run already exists (e.g., created by a sweep script), reuse it
+            if wandb.run is not None:
+                self.logger.info("Reusing active WandB run (likely sweep-managed); will not re-initialize.")
+                self._wandb_run_owned = False
+
+                # Best-effort: update any missing config fields without overwriting sweep-controlled values
+                try:
+                    existing_cfg = wandb.run.config
+                    supplemental_cfg = dict(
+                        dataset=f"{self.cfg.dataset_name}/{self.cfg.data_root.name}",
+                        target_transform=target_transform,
+                        task=self.cfg.task,
+                        architecture=self.model_module,
+                        model_name=self.cfg.model_config.name,
+                        epochs=self.cfg.num_epochs,
+                        train_batch_size=self.cfg.train_batch_size,
+                        lr=self.cfg.lr,
+                        loss_fn=self.cfg.loss_fn.name,
+                        optimizer=self.cfg.optimizer.name,
+                        scheduler=self.cfg.scheduler.name,
+                    )
+                    # Only include keys not present in the existing config
+                    missing = {k: v for k, v in supplemental_cfg.items() if k not in existing_cfg}
+                    if missing:
+                        existing_cfg.update(missing, allow_val_change=False)
+                except Exception as e:
+                    print(f'Tried to update run info but failed: {e}')
+                    # Config update is best-effort; ignore if not supported
+                    pass
+
+                return wandb.run
+
+            # Otherwise, initialize a fresh run and mark ownership
+            self.logger.info("Initializing a new WandB run!")
             run = wandb.init(
+                name=self.save_path.name,
                 entity=self.cfg.wandb_group_name,
                 project=self.cfg.wandb_project_name,
                 # name=f"{self.cfg.dataset_name}/{self.cfg.model_config.name}",
@@ -431,24 +649,21 @@ class Trainer(TrainerBase):
                 # sync_tensorboard=True, # TODO: Look into this
                 dir=self.save_path,
                 settings=wandb.Settings(api_key=self.cfg.wandb_key) if self.cfg.wandb_key else None,
-                
-                config = dict(
-                    dataset = f"{self.cfg.dataset_name}/{self.cfg.data_root.name}", # self.cfg.dataset_name,
-                    target_transform = target_transform,
-                    task = self.cfg.task,
-                    architecture = self.model_module,
-                    model_name = self.cfg.model_config.name,
-                    
-                    epochs = self.cfg.num_epochs,
-                    batch_size = self.cfg.train_batch_size,
-                    learning_rate = self.cfg.lr,
-                    
-                    loss_fn = self.cfg.loss_fn.name, # TODO: Look into logging the args as well
-                    optimizer = self.cfg.optimizer.name,
-                    scheduler = self.cfg.scheduler.name,
-                )
-                
+                config=dict(
+                    dataset=f"{self.cfg.dataset_name}/{self.cfg.data_root.name}",  # self.cfg.dataset_name,
+                    target_transform=target_transform,
+                    task=self.cfg.task,
+                    architecture=self.model_module,
+                    model_name=self.cfg.model_config.name,
+                    epochs=self.cfg.num_epochs,
+                    train_batch_size=self.cfg.train_batch_size,
+                    lr=self.cfg.lr,
+                    loss_fn=self.cfg.loss_fn.name,  # TODO: Look into logging the args as well
+                    optimizer=self.cfg.optimizer.name,
+                    scheduler=self.cfg.scheduler.name,
+                ),
             )
+            self._wandb_run_owned = True
             return run
         else:
             return None
@@ -480,6 +695,7 @@ class Trainer(TrainerBase):
             # Assign weak proxy to avoid circular reference
             hook_instance.trainer = weakref.proxy(self)
             hooks.append(hook_instance)
+            self.logger.debug(f"Successfully registered hook: {hook_instance}")
         
         return hooks
     

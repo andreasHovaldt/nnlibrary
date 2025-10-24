@@ -89,7 +89,6 @@ scheduler = BaseConfig( # 'optimizer' should not be passed in args
     name = "OneCycleLR",
     args=dict(
         pct_start = 0.1, # % of time used for warmup
-        max_lr = lr,
         anneal_strategy = "cos",
         div_factor = 1e1, # 10.0,
         final_div_factor = 1e3, # 1000.0,
@@ -118,7 +117,6 @@ dataset.train = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size = train_batch_size,
     shuffle = True,
 )
 
@@ -130,7 +128,6 @@ dataset.val = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size=eval_batch_size,
     shuffle=False,
 )
 
@@ -142,6 +139,5 @@ dataset.test = DataLoaderConfig(
             cache_in_memory = True,
             verbose = True,
         )),
-    batch_size=eval_batch_size,
     shuffle=False,
 )

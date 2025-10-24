@@ -36,6 +36,10 @@ hooks = [
     h.TimingHook,
 ]
 
+# Reproducibility controls
+# If set to an integer, training will attempt to be deterministic across Python, NumPy, and PyTorch
+# Note: some CUDA ops are inherently non-deterministic; enabling full determinism may impact performance
+seed = None
+
 # TODO CONFIGS
-# seed = None
 # weight = None

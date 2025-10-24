@@ -136,8 +136,8 @@ class ClassificationEvaluator(EvaluatorBase):
         if self.detailed and y_true.numel() > 0:
             result.update({
                 "confusion_matrix": self._confusion_matrix(y_true=y_true, y_pred=y_pred, class_names=self.class_names),
-                "y_true_seq": y_true,
-                "y_pred_seq": y_pred,
+                "y_true": y_true,
+                "y_pred": y_pred,
             })
 
         return result
@@ -304,8 +304,8 @@ class RegressionEvaluator(EvaluatorBase):
         # If detailed, return raw sequences and create plots
         if self.detailed and len(y_true) > 0:
             result.update({
-                "y_true_seq": y_true,
-                "y_pred_seq": y_pred,
+                "y_true": y_true,
+                "y_pred": y_pred,
                 "prediction_plots": self._create_prediction_plots(y_true, y_pred, draw_quantiles = False, draw_standard_deviation = True),
             })
         

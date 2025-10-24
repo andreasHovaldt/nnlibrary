@@ -4,14 +4,29 @@ if __name__ == "__main__":
     import importlib
     import importlib.util
     import pkgutil
+    import logging
+    import argparse
     from types import ModuleType
     from pathlib import Path
-    from typing import Any, cast
 
-    if len(sys.argv) != 2:
-        print("Usage: python train.py <config_name>")
-        sys.exit(1)
-    config_name = str(sys.argv[1])
+
+    parser = argparse.ArgumentParser(description="Helper script used for training on the defined config file")
+    parser.add_argument("-n", "--config-name", type=str, required=True, help="Name of config, either as shorthand 'TCN-reg', as dotted module 'nnlibrary.configs.TCN-reg' or as file path '~/nnlibrary/configs/TCN-reg.py'.")
+    parser.add_argument("--logging", action="store_true", help="Whether to display logger prints.")
+    parser.add_argument('--log-level', default='INFO', choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'], help="The logging level used if logging is enabled. Default: INFO")
+    args = parser.parse_args()
+    
+    if args.logging:    
+        logging.getLogger('matplotlib').setLevel(logging.INFO)
+        logger = logging.getLogger(__name__)
+        logging.basicConfig(
+            level=getattr(logging, args.log_level),
+            format='%(asctime)s | %(filename)s:%(funcName)s | %(levelname)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            stream=sys.stdout
+        )
+    
+    config_name = str(args.config_name)
 
     # Add project root to Python path
     project_root = Path(__file__).parent.parent.resolve()
@@ -90,5 +105,5 @@ if __name__ == "__main__":
     # TODO: This option could be useful with a passed param for how many gpus to use
     # os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use specific GPU
 
-    trainer = Trainer(cfg=cast(Any, cfg))
+    trainer = Trainer(cfg=cfg)
     trainer.train()
