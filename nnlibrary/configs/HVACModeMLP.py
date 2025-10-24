@@ -40,9 +40,9 @@ validation_metric_higher_is_better = True
 model_config = BaseConfig(
     name = "HVACModeMLP",
     args = dict(
-        window_size = dataset_metadata["window"],
-        feature_dim = dataset_metadata["feature_dim"],
-        n_classes = dataset_metadata["num_classes"],
+        window_size = dataset_metadata["temporal_settings"]["window"],
+        feature_dim = dataset_metadata["dataset_info"]["feature_dim"],
+        n_classes = dataset_metadata["dataset_info"]["num_classes"],
     )
 )
 
