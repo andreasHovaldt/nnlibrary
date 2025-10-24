@@ -211,7 +211,7 @@ class ValidationHook(Hookbase):
         if self.trainer and self.trainer.cfg.validate_model:
             
             if self.validator is None:
-                validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
+                validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val, self.trainer.cfg.eval_batch_size)
                 
                 if self.trainer.cfg.task == "classification":
                     self.validator = ClassificationEvaluator(
@@ -302,7 +302,7 @@ class TestHook(Hookbase):
         if self.trainer and self.trainer.cfg.test_model:
             
             if self.tester is None:
-                test_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.test)
+                test_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.test, self.trainer.cfg.eval_batch_size)
                 
                 if self.trainer.cfg.task == "classification":
                     self.tester = ClassificationEvaluator(
