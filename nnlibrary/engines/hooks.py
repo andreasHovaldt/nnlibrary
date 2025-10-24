@@ -401,7 +401,7 @@ class CheckpointerHook(Hookbase):
                 save_dir / "model_last.pth.tmp"
             )
             os.replace(save_dir / "model_last.pth.tmp", save_dir / "model_last.pth")
-            
+            self.trainer.logger.debug(f"Saved latest model to: '{save_dir / "model_last.pth"}'")
             
             # Save a copy as best if validation improved
             if self.trainer.cfg.validate_model:
@@ -419,6 +419,7 @@ class CheckpointerHook(Hookbase):
                             save_dir / "model_last.pth",
                             save_dir / "model_best.pth",
                         )
+                        self.trainer.logger.info(f"Saved new best model to: {save_dir / "model_best.pth"}")
                         self.best_metric_value_high = metric_val
                 else:
                     if metric_val is not None and metric_val < self.best_metric_value_low:
@@ -427,6 +428,7 @@ class CheckpointerHook(Hookbase):
                             save_dir / "model_last.pth",
                             save_dir / "model_best.pth",
                         )
+                        self.trainer.logger.info(f"Saved new best model to: {save_dir / "model_best.pth"}")
                         self.best_metric_value_low = metric_val
             
 

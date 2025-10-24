@@ -1,4 +1,5 @@
 import os
+import gc
 import sys
 import wandb
 import importlib
@@ -117,6 +118,8 @@ def sweeper_func(cfg, sweep_root):
     
     run.log(data=sweep_log_dict)
     run.finish()
+    del trainer, cfg
+    gc.collect()
 
 
 if __name__ == "__main__":
@@ -131,6 +134,7 @@ if __name__ == "__main__":
     from nnlibrary.configs.__base__ import BaseConfig
     
     if args.logging:
+        logging.getLogger('matplotlib').setLevel(logging.INFO)
         logger = logging.getLogger(__name__)
         logging.basicConfig(
             level=getattr(logging, args.log_level),
