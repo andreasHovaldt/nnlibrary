@@ -4,6 +4,7 @@ import sys; sys.path.append(str(Path(__file__).parent.parent))
 import time
 import random
 import torch
+from torch.amp.grad_scaler import GradScaler
 import numpy as np
 from typing import TypedDict, Literal
 from nnlibrary.models import TransformerRegression, TransformerRegressionOptimized
@@ -34,10 +35,15 @@ INPUT_DIM = 37
 OUTPUT_DIM = 5
 SEQUENCE_LENGTH = 32
 BATCH_SIZE = 32
-INFERENCE_MODE = False
-TORCH_COMPILE = False
 
-# Model args (now precisely typed)
+# Test settings
+TORCH_COMPILE = False
+STEPS = 1000
+WARMUP_STEPS = 100
+LR = 1e-3
+AMP_DTYPE = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
+# Model args
 transformer_hyperparameters: TransformerHyperparameters = {
     'input_dim': INPUT_DIM,
     'output_dim': OUTPUT_DIM,
@@ -71,47 +77,92 @@ except RuntimeError:
 # Benchmark
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('using device: ', device)
-model_basic.to(device)              # avoid device mismatch
+model_basic.to(device)
 model_opt.to(device)
 x = torch.randn(BATCH_SIZE, SEQUENCE_LENGTH, INPUT_DIM, device=device)
+target = torch.randn(BATCH_SIZE, OUTPUT_DIM, device=device)
 
-# Toggle model mode based on INFERENCE_MODE
-if INFERENCE_MODE:
-    model_basic.eval()
-    model_opt.eval()
+model_basic.train()
+model_opt.train()
+
+# Cache initial weights so each benchmark starts from the same point
+init_state_basic = {k: v.detach().clone() for k, v in model_basic.state_dict().items()}
+init_state_opt = {k: v.detach().clone() for k, v in model_opt.state_dict().items()}
+
+def train_benchmark(model: torch.nn.Module, steps: int, warmup: int, use_amp: bool) -> float:
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
+    scaler = GradScaler(device=str(device), enabled=use_amp and AMP_DTYPE == torch.float16 and device.type == 'cuda')
+
+    # Warmup
+    for _ in range(warmup):
+        optimizer.zero_grad(set_to_none=True)
+        if use_amp and device.type == 'cuda':
+            with torch.autocast(device_type='cuda', dtype=AMP_DTYPE):
+                y = model(x)
+                loss = torch.nn.functional.mse_loss(y, target)
+            if AMP_DTYPE == torch.float16:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+        else:
+            y = model(x)
+            loss = torch.nn.functional.mse_loss(y, target)
+            loss.backward()
+            optimizer.step()
+
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
+    start = time.perf_counter()
+
+    for _ in range(steps):
+        optimizer.zero_grad(set_to_none=True)
+        if use_amp and device.type == 'cuda':
+            with torch.autocast(device_type='cuda', dtype=AMP_DTYPE):
+                y = model(x)
+                loss = torch.nn.functional.mse_loss(y, target)
+            if AMP_DTYPE == torch.float16:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+        else:
+            y = model(x)
+            loss = torch.nn.functional.mse_loss(y, target)
+            loss.backward()
+            optimizer.step()
+
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
+    return time.perf_counter() - start
+
+# -------- Training benchmarks --------
+# FP32
+model_basic.load_state_dict(init_state_basic)
+model_opt.load_state_dict(init_state_opt)
+basic_fp32_time = train_benchmark(model_basic, STEPS, WARMUP_STEPS, use_amp=False)
+opt_fp32_time = train_benchmark(model_opt, STEPS, WARMUP_STEPS, use_amp=False)
+print(f"Train FP32 - Basic: {basic_fp32_time:.2f}s | Optimized: {opt_fp32_time:.2f}s | Speedup: {basic_fp32_time / opt_fp32_time:.2f}x")
+
+# AMP (CUDA only)
+basic_amp_time = None
+opt_amp_time = None
+if device.type == 'cuda':
+    model_basic.load_state_dict(init_state_basic)
+    model_opt.load_state_dict(init_state_opt)
+    basic_amp_time = train_benchmark(model_basic, STEPS, WARMUP_STEPS, use_amp=True)
+    opt_amp_time = train_benchmark(model_opt, STEPS, WARMUP_STEPS, use_amp=True)
+    print(f"Train AMP  - Basic: {basic_amp_time:.2f}s | Optimized: {opt_amp_time:.2f}s | Speedup: {basic_amp_time / opt_amp_time:.2f}x")
 else:
-    model_basic.train()
-    model_opt.train()
+    print("Train AMP: skipped (CUDA not available)")
 
-# Warmup both models to stabilize kernels/JIT
-with (torch.inference_mode() if INFERENCE_MODE else torch.enable_grad()):
-    for _ in range(10):
-        _ = model_basic(x)
-        _ = model_opt(x)
-    torch.cuda.synchronize() if device.type == 'cuda' else None
-
-# Basic (inference)
-y: torch.Tensor | None = None
-start = time.perf_counter()
-with (torch.inference_mode() if INFERENCE_MODE else torch.enable_grad()):
-    for _ in range(1000):
-        y = model_basic(x)
-    torch.cuda.synchronize() if device.type == 'cuda' else None
-basic_time = time.perf_counter() - start
-assert y is not None
-print(y.sum(dim=0))
-
-# Optimized (inference)
-out: torch.Tensor | None = None
-start = time.perf_counter()
-with (torch.inference_mode() if INFERENCE_MODE else torch.enable_grad()):
-    for _ in range(1000):
-        out = model_opt(x)
-    torch.cuda.synchronize() if device.type == 'cuda' else None
-opt_time = time.perf_counter() - start
-assert out is not None
-print(out.sum(dim=0))
-
-print(f"Basic: {basic_time:.2f}s")
-print(f"Optimized: {opt_time:.2f}s")
-print(f"Speedup: {basic_time / opt_time:.2f}x")
+# Simple throughput metric (tokens/sec)
+tokens = BATCH_SIZE * SEQUENCE_LENGTH * STEPS
+print(f"Throughput FP32 - Basic: {tokens/basic_fp32_time:.0f} tok/s | Optimized: {tokens/opt_fp32_time:.0f} tok/s")
+if device.type == 'cuda' and basic_amp_time is not None and opt_amp_time is not None:
+    print(f"Throughput AMP  - Basic: {tokens/basic_amp_time:.0f} tok/s | Optimized: {tokens/opt_amp_time:.0f} tok/s")

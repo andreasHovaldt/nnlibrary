@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
+from .transformer import PositionWiseFeedForward, PositionalEncoding
 
 
 class TransformerRegressionOptimized(nn.Module):
@@ -243,33 +243,3 @@ class MultiHeadAttentionOptimized(nn.Module):
         attn_output = self.out_proj(attn_output)
         
         return attn_output
-
-
-class PositionWiseFeedForward(nn.Module):
-    def __init__(self, dim_model: int, dim_ff: int):
-        super().__init__()
-        self.fc1 = nn.Linear(dim_model, dim_ff)
-        self.fc2 = nn.Linear(dim_ff, dim_model)
-        self.relu = nn.ReLU()
-    
-    def forward(self, x):
-        return self.fc2(self.relu(self.fc1(x)))
-
-
-class PositionalEncoding(nn.Module):
-    def __init__(self, dim_model: int, max_seq_length: int):
-        super().__init__()
-        
-        pe = torch.zeros(max_seq_length, dim_model)
-        position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, dim_model, 2).float() * -(math.log(10000.0) / dim_model)
-        )
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        
-        self.register_buffer('pe', pe.unsqueeze(0))
-    
-    def forward(self, x):
-        return x + self.pe[:, :x.size(1)] # type: ignore
