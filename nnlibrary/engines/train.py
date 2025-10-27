@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torch.amp.grad_scaler import GradScaler
 
 import nnlibrary.models
 import nnlibrary.datasets
@@ -145,6 +146,7 @@ class Trainer(TrainerBase):
         self.device: str = self.cfg.device
         self.amp_enable: bool = self.cfg.amp_enable
         self.amp_dtype: torch.dtype = AMP_DTYPES[self.cfg.amp_dtype]
+        self.scaler = GradScaler(enabled=(self.amp_enable and self.amp_dtype == torch.float16 and self.device == 'cuda'))
         
         self.model = self.build_model(self.cfg.model_config)
         self.logger.debug("Successfully built model!")
@@ -264,20 +266,38 @@ class Trainer(TrainerBase):
             y_batch = y_batch.to(device=self.device, non_blocking=True)
             
         # Train model
+        self.optimizer.zero_grad(set_to_none=True) # Reset gradients
+        
         with autocast(enabled=self.amp_enable, dtype=self.amp_dtype):
-            # Forward pass
-            self.optimizer.zero_grad()
+            # Forward pass (autocast handles appropriate dtypes)
             y_pred: torch.Tensor = self.model(X_batch)
             loss: torch.Tensor = self.loss_fn(y_pred, y_batch)
+
+        # Backward + step
+        if (self.amp_enable) and (self.amp_dtype == torch.float16) and (self.device == 'cuda') and (self.scaler is not None):
+            # Use GradScaler only for fp16 on CUDA to avoid underflow
+            # The “scale” is a multiplier applied to the loss before backward to make gradients larger and avoid FP16 underflow; then it’s divided back out before the optimizer step.
+            prev_scale = self.scaler.get_scale() # prev_scale is a snapshot of the dynamic scale before an update, this way you can tell if an overflow occurred. If the scale has decreased next time, we know under/overflow occured
+            self.scaler.scale(loss).backward()
             
-            # Backward pass
+            # NOTE: If gradient clipping is ever implemented, call self.scaler.unscale_(self.optimizer) then clip
+            
+            self.scaler.step(self.optimizer) # This only performas a step if no inf/nan values are found in the gradients
+            self.scaler.update() # If a step was skipped, the scaler decreases the scale for next iteration, to hopefully keep the gradients within float16 precision
+            
+            # Only step scheduler if optimizer step wasn't skipped due to overflow
+            if self.scheduler is not None and self.scaler.get_scale() >= prev_scale:
+                self.scheduler.step()
+        else:
+            # bf16 or non-AMP: plain backward
             loss.backward()
             self.optimizer.step()
-            self.scheduler.step()
-            
-            # Log the train loss
-            self.info["loss_iter"] = loss.item()
-            self.info["loss_epoch_total"] += loss.item()
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+        # Log the train loss
+        self.info["loss_iter"] = loss.item()
+        self.info["loss_epoch_total"] += loss.item()
             
     def before_epoch(self):
         # Make sure the model is in training mode at the start of every epoch
