@@ -13,21 +13,21 @@ class TransformerRegressionOptimized(nn.Module):
         self,
         input_dim: int,
         output_dim: int,
-        d_model: int = 128, # Internal representation dimension (model width), "How much information can the model remember about each timestep?"
-        num_heads: int = 4, # Number of parallel attention heads, "How many different ways can the model look at relationships?"
-        num_layers: int = 3, # Number of stacked transformer encoder layers (model depth), "How many times should the model refine its understanding?"
-        d_ff: int = 512, # Feedforward network hidden dimension, "Internal processing capacity after attention"
-        max_seq_length: int = 100, # Maximum sequence length (for positional encoding buffer), "What's the longest sequence I'll ever feed?"
+        dim_model: int = 128,       # Internal representation dimension (model width), "How much information can the model remember about each timestep?"
+        num_heads: int = 4,         # Number of parallel attention heads, "How many different ways can the model look at relationships?"
+        num_layers: int = 3,        # Number of stacked transformer encoder layers (model depth), "How many times should the model refine its understanding?"
+        dim_ff: int = 512,          # Feedforward network hidden dimension, "Internal processing capacity after attention"
+        max_seq_length: int = 100,  # Maximum sequence length (for positional encoding buffer), "What's the longest sequence I'll ever feed?"
         dropout: float = 0.1,
         pooling: str = 'last',
     ):
         super().__init__()
         
-        self.input_projection = nn.Linear(input_dim, d_model)
-        self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
+        self.input_projection = nn.Linear(input_dim, dim_model)
+        self.positional_encoding = PositionalEncoding(dim_model, max_seq_length)
         
         self.encoder_layers = nn.ModuleList([
-            EncoderLayerOptimized(d_model, num_heads, d_ff, dropout)
+            EncoderLayerOptimized(dim_model, num_heads, dim_ff, dropout)
             for _ in range(num_layers)
         ])
         
@@ -35,11 +35,12 @@ class TransformerRegressionOptimized(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Regression head
-        self.fc1 = nn.Linear(d_model, d_model // 2)
-        self.fc2 = nn.Linear(d_model // 2, output_dim)
+        self.fc1 = nn.Linear(dim_model, dim_model // 2)
+        self.fc2 = nn.Linear(dim_model // 2, output_dim)
+        self.relu = nn.ReLU()
         
         if pooling == 'cls':
-            self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+            self.cls_token = nn.Parameter(torch.randn(1, 1, dim_model))
     
     def forward(self, x, mask=None):
         """
@@ -51,8 +52,8 @@ class TransformerRegressionOptimized(nn.Module):
         """
         batch_size = x.shape[0]
         
-        # Project input
-        x = self.input_projection(x)
+        # Project input features to model dimension
+        x = self.input_projection(x) # (batch, seq_len, d_model)
         x = self.positional_encoding(x)
         x = self.dropout(x)
         
@@ -64,7 +65,7 @@ class TransformerRegressionOptimized(nn.Module):
                 cls_mask = torch.ones(batch_size, 1, device=mask.device, dtype=mask.dtype)
                 mask = torch.cat([cls_mask, mask], dim=1)
         
-        # Pass through encoder layers
+        # Pass through transformer encoder layers
         for layer in self.encoder_layers:
             x = layer(x, mask=mask)
         
@@ -73,16 +74,18 @@ class TransformerRegressionOptimized(nn.Module):
             x = x[:, -1, :]
         elif self.pooling == 'mean':
             if mask is not None:
-                # Masked mean
+                # Masked mean pooling
                 mask_expanded = mask.unsqueeze(-1).float()
-                x = (x * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1e-9)
+                sum_embeddings = (x * mask_expanded).sum(dim=1)
+                sum_mask = mask_expanded.sum(dim=1)
+                x = sum_embeddings / sum_mask.clamp(min=1e-9)
             else:
                 x = x.mean(dim=1)
         elif self.pooling == 'cls':
             x = x[:, 0, :]
         
         # Regression head
-        x = F.relu(self.fc1(x))
+        x = self.relu(self.fc1(x))
         x = self.dropout(x)
         output = self.fc2(x)
         
@@ -99,7 +102,7 @@ class EncoderLayerOptimized(nn.Module):
             E_k=d_model,
             E_v=d_model,
             E_total=d_model,
-            nheads=num_heads,
+            num_heads=num_heads,
             dropout=dropout,
         )
         
@@ -109,11 +112,19 @@ class EncoderLayerOptimized(nn.Module):
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, x, mask=None):
-        # Self-attention with residual
-        attn_output = self.self_attn(x, x, x, attn_mask=mask)
+        # Prepare attention mask for SDPA: expects True = masked positions
+        attn_mask = None
+        if mask is not None:
+            # Incoming mask is (B, T) with True/1 = keep
+            mask_bool = mask.bool()
+            # Convert to SDPA semantics: True = do not attend
+            attn_mask = (~mask_bool).unsqueeze(1).unsqueeze(2)  # (B,1,1,T)
+
+        # Self-attention with residual connection
+        attn_output = self.self_attn(x, x, x, attn_mask=attn_mask)
         x = self.norm1(x + self.dropout(attn_output))
         
-        # Feedforward with residual
+        # Feedforward with residual connection
         ff_output = self.feed_forward(x)
         x = self.norm2(x + self.dropout(ff_output))
         
@@ -131,12 +142,12 @@ class MultiHeadAttentionOptimized(nn.Module):
         E_k: int,
         E_v: int,
         E_total: int,
-        nheads: int,
+        num_heads: int,
         dropout: float = 0.0,
         bias: bool = True,
     ):
         super().__init__()
-        self.nheads = nheads
+        self.num_heads = num_heads
         self.dropout = dropout
         
         # Check if Q, K, V have same embedding dim
@@ -153,8 +164,8 @@ class MultiHeadAttentionOptimized(nn.Module):
         
         self.out_proj = nn.Linear(E_total, E_q, bias=bias)
         
-        assert E_total % nheads == 0, "E_total must be divisible by nheads"
-        self.E_head = E_total // nheads
+        assert E_total % num_heads == 0, "E_total must be divisible by nheads"
+        self.E_head = E_total // num_heads
         self.bias = bias
     
     def forward(
@@ -203,16 +214,16 @@ class MultiHeadAttentionOptimized(nn.Module):
         
         # Step 2: Split heads
         # (N, L, E_total) -> (N, L, nheads, E_head) -> (N, nheads, L, E_head)
-        query = query.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
-        key = key.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
-        value = value.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
+        query = query.unflatten(-1, [self.num_heads, self.E_head]).transpose(1, 2)
+        key = key.unflatten(-1, [self.num_heads, self.E_head]).transpose(1, 2)
+        value = value.unflatten(-1, [self.num_heads, self.E_head]).transpose(1, 2)
         
-        # Handle attention mask
-        # Convert boolean mask to additive mask for SDPA
+        # attn_mask is expected to be broadcastable to (N, nheads, L_q, L_k)
+        # Convert boolean mask (True = masked) to additive mask to match
+        # masked_fill(-inf) semantics used by the basic implementation.
         if attn_mask is not None and attn_mask.dtype == torch.bool:
-            # PyTorch SDPA expects: True = attend, False = mask
-            # But it wants None or float mask, so we don't convert
-            pass
+            neg_inf = torch.finfo(query.dtype).min
+            attn_mask = attn_mask.to(query.dtype) * neg_inf
         
         # Step 3: Scaled dot-product attention (OPTIMIZED!)
         attn_output = F.scaled_dot_product_attention(
@@ -235,23 +246,24 @@ class MultiHeadAttentionOptimized(nn.Module):
 
 
 class PositionWiseFeedForward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int):
+    def __init__(self, dim_model: int, dim_ff: int):
         super().__init__()
-        self.fc1 = nn.Linear(d_model, d_ff)
-        self.fc2 = nn.Linear(d_ff, d_model)
+        self.fc1 = nn.Linear(dim_model, dim_ff)
+        self.fc2 = nn.Linear(dim_ff, dim_model)
+        self.relu = nn.ReLU()
     
     def forward(self, x):
-        return self.fc2(F.relu(self.fc1(x)))
+        return self.fc2(self.relu(self.fc1(x)))
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_seq_length: int):
+    def __init__(self, dim_model: int, max_seq_length: int):
         super().__init__()
         
-        pe = torch.zeros(max_seq_length, d_model)
+        pe = torch.zeros(max_seq_length, dim_model)
         position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+            torch.arange(0, dim_model, 2).float() * -(math.log(10000.0) / dim_model)
         )
         
         pe[:, 0::2] = torch.sin(position * div_term)
