@@ -163,10 +163,10 @@ class MultiHeadAttention(nn.Module):
 
 
 class PositionWiseFeedForward(nn.Module):
-    def __init__(self, d_model, d_ff):
+    def __init__(self, dim_model, dim_ff):
         super().__init__()
-        self.fc1 = nn.Linear(d_model, d_ff)
-        self.fc2 = nn.Linear(d_ff, d_model)
+        self.fc1 = nn.Linear(dim_model, dim_ff)
+        self.fc2 = nn.Linear(dim_ff, dim_model)
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -174,13 +174,13 @@ class PositionWiseFeedForward(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_seq_length):
+    def __init__(self, dim_model, max_seq_length):
         super().__init__()
         
-        pe = torch.zeros(max_seq_length, d_model)
+        pe = torch.zeros(max_seq_length, dim_model)
         position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+            torch.arange(0, dim_model, 2).float() * -(math.log(10000.0) / dim_model)
         )
         
         pe[:, 0::2] = torch.sin(position * div_term)
