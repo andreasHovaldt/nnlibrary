@@ -13,21 +13,21 @@ class TransformerRegression(nn.Module):
         self, 
         input_dim,           # Number of input features per timestep
         output_dim,          # Number of outputs (5 for your HVAC)
-        d_model=128,         # Model dimension
+        dim_model=128,       # Model dimension
         num_heads=4,         # Number of attention heads
         num_layers=3,        # Number of transformer layers
-        d_ff=512,            # Feedforward dimension
+        dim_ff=512,          # Feedforward dimension
         max_seq_length=100,  # Maximum sequence length
         dropout=0.1,
         pooling='last'       # 'last', 'mean', or 'cls'
     ):
         super().__init__()
         
-        self.input_projection = nn.Linear(input_dim, d_model)
-        self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
+        self.input_projection = nn.Linear(input_dim, dim_model)
+        self.positional_encoding = PositionalEncoding(dim_model, max_seq_length)
         
         self.encoder_layers = nn.ModuleList([
-            EncoderLayer(d_model, num_heads, d_ff, dropout) 
+            EncoderLayer(dim_model, num_heads, dim_ff, dropout) 
             for _ in range(num_layers)
         ])
         
@@ -35,13 +35,13 @@ class TransformerRegression(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Regression head
-        self.fc1 = nn.Linear(d_model, d_model // 2)
-        self.fc2 = nn.Linear(d_model // 2, output_dim)
+        self.fc1 = nn.Linear(dim_model, dim_model // 2)
+        self.fc2 = nn.Linear(dim_model // 2, output_dim)
         self.relu = nn.ReLU()
         
         # Optional: learnable CLS token
         if pooling == 'cls':
-            self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+            self.cls_token = nn.Parameter(torch.randn(1, 1, dim_model))
     
     def forward(self, x, mask=None):
         """
@@ -55,7 +55,8 @@ class TransformerRegression(nn.Module):
         
         # Project input features to model dimension
         x = self.input_projection(x)  # (batch, seq_len, d_model)
-        x = self.dropout(self.positional_encoding(x))
+        x = self.positional_encoding(x)
+        x = self.dropout(x)
         
         # Add CLS token if using
         if self.pooling == 'cls':
