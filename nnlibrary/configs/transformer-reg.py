@@ -39,20 +39,6 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TCNRegression",
-    args = dict(
-        input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        sequence_length=dataset_metadata["temporal_settings"]["window"],
-        num_classes=dataset_metadata["dataset_info"]["num_classes"],
-        regression_head_hidden_dim=64,
-        hidden_layer_sizes=[64, 64, 128, 128],
-        kernel_size=3,
-        dropout=0.3,
-        dropout_type="channel",
-    )
-)
-
-model_config = dict(
     name = "TransformerRegressionOptimized",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],

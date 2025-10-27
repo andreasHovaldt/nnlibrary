@@ -2,6 +2,7 @@ from pathlib import Path
 import sys; sys.path.append(str(Path(__file__).parent.parent))
 
 import time
+import argparse
 import random
 import torch
 from torch.amp.grad_scaler import GradScaler
@@ -30,18 +31,33 @@ class TransformerHyperparameters(TypedDict):
     dropout: float
     pooling: Literal['last', 'mean', 'cls']
 
-# Dataset settings
+# CLI args to align with standalone AMP test behavior
+parser = argparse.ArgumentParser(description="Transformer training AMP benchmark (basic vs optimized)")
+parser.add_argument("--steps", type=int, default=1000, help="Timed training steps per mode (FP32/AMP). Default: 1000")
+parser.add_argument("--warmup", type=int, default=100, help="Warmup steps before timing. Default: 100")
+parser.add_argument("--batch-size", type=int, default=512, help="Batch size. Default: 32")
+parser.add_argument("--seq-len", type=int, default=32, help="Sequence length (window). Default: 32")
+parser.add_argument("--amp-dtype", choices=["auto","float16","bfloat16"], default="float16", help="AMP dtype to use. Default: float16")
+parser.add_argument("--disable-tf32", action="store_true", help="Disable TF32 for a true FP32 baseline (sets highest precision)")
+args = parser.parse_args()
+
+# Dataset/model settings
 INPUT_DIM = 37
 OUTPUT_DIM = 5
-SEQUENCE_LENGTH = 32
-BATCH_SIZE = 32
+SEQUENCE_LENGTH = int(args.seq_len)
+BATCH_SIZE = int(args.batch_size)
 
 # Test settings
 TORCH_COMPILE = False
-STEPS = 1000
-WARMUP_STEPS = 100
+STEPS = int(args.steps)
+WARMUP_STEPS = int(args.warmup)
 LR = 1e-3
-AMP_DTYPE = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+if args.amp_dtype == "float16":
+    AMP_DTYPE = torch.float16
+elif args.amp_dtype == "bfloat16":
+    AMP_DTYPE = torch.bfloat16
+else:
+    AMP_DTYPE = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
 
 # Model args
 transformer_hyperparameters: TransformerHyperparameters = {
@@ -77,6 +93,15 @@ except RuntimeError:
 # Benchmark
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('using device: ', device)
+if device.type == 'cuda' and args.disable_tf32:
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        torch.set_float32_matmul_precision('highest')
+    except Exception:
+        pass
+if device.type == 'cuda':
+    print(f"TF32 allow: {torch.backends.cuda.matmul.allow_tf32} | float32 matmul precision: {torch.get_float32_matmul_precision()}")
+print(f"AMP dtype: {AMP_DTYPE}")
 model_basic.to(device)
 model_opt.to(device)
 x = torch.randn(BATCH_SIZE, SEQUENCE_LENGTH, INPUT_DIM, device=device)
@@ -91,7 +116,7 @@ init_state_opt = {k: v.detach().clone() for k, v in model_opt.state_dict().items
 
 def train_benchmark(model: torch.nn.Module, steps: int, warmup: int, use_amp: bool) -> float:
     model.train()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, fused=True if device.type == 'cuda' else False)
     scaler = GradScaler(device=str(device), enabled=use_amp and AMP_DTYPE == torch.float16 and device.type == 'cuda')
 
     # Warmup
