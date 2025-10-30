@@ -288,6 +288,9 @@ class Trainer(TrainerBase):
             # Only step scheduler if optimizer step wasn't skipped due to overflow
             if self.scheduler is not None and self.scaler.get_scale() >= prev_scale:
                 self.scheduler.step()
+            else:
+                self.logger.info("Optimizer step was skipped due to over/underflow!")
+                self._scaler_was_activated = True
         else:
             # bf16 or non-AMP: plain backward
             loss.backward()
@@ -315,6 +318,11 @@ class Trainer(TrainerBase):
     def after_epoch(self):
         self.info["loss_epoch_avg"] = self.info["loss_epoch_total"] / len(self.trainloader)
         return super().after_epoch()
+    
+    def after_train(self):
+        if getattr(self, '_scaler_was_activated', False):
+            self.logger.info("The scaler was utilized during this training run. This means that either over or underflow was detected in the gradients.")
+        return super().after_train()
 
 
     def build_model(self, model_config: Union[BaseConfig, Dict]) -> nn.Module:
