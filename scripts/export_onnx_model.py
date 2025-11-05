@@ -323,8 +323,8 @@ def main() -> None:
     model.to('cpu').eval()
 
     # Build dynamic axes
-    input_name = 'input'
-    output_name = 'output'
+    input_name = 'x'
+    output_name = 'y'
     dynamic_shapes = build_dynamic_signatures(
         shape_info, input_name, args.dynamic_batch, args.dynamic_seq
     )
