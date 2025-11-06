@@ -23,6 +23,9 @@ class TransformerRegressionOptimized(nn.Module):
     ):
         super().__init__()
         
+        self.output_dim = output_dim
+        self.pooling = pooling
+        
         self.input_projection = nn.Linear(input_dim, dim_model)
         self.positional_encoding = PositionalEncoding(dim_model, max_seq_length)
         
@@ -90,6 +93,133 @@ class TransformerRegressionOptimized(nn.Module):
         output = self.fc2(x)
         
         return output
+
+
+
+class TransformerClassificationOptimized(nn.Module):
+    """
+    Optimized Transformer for time-series classification
+    Uses PyTorch's efficient scaled_dot_product_attention
+    Default pooling is 'cls' token (best practice for classification)
+    """
+    def __init__(
+        self,
+        input_dim: int,
+        num_classes: int,
+        dim_model: int = 128,       # Internal representation dimension (model width)
+        num_heads: int = 4,         # Number of parallel attention heads
+        num_layers: int = 3,        # Number of stacked transformer encoder layers (model depth)
+        dim_ff: int = 512,          # Feedforward network hidden dimension
+        max_seq_length: int = 100,  # Maximum sequence length (for positional encoding buffer)
+        dropout: float = 0.1,
+        pooling: str = 'cls',       # 'cls', 'mean', or 'last' - cls is recommended for classification
+    ):
+        super().__init__()
+        
+        self.num_classes = num_classes
+        self.pooling = pooling
+        
+        # Input projection
+        self.input_projection = nn.Linear(input_dim, dim_model)
+        self.positional_encoding = PositionalEncoding(dim_model, max_seq_length)
+        
+        # Transformer encoder layers
+        self.encoder_layers = nn.ModuleList([
+            EncoderLayerOptimized(dim_model, num_heads, dim_ff, dropout)
+            for _ in range(num_layers)
+        ])
+        
+        self.dropout = nn.Dropout(dropout)
+        
+        # Classification head
+        self.fc1 = nn.Linear(dim_model, dim_model // 2)
+        self.fc2 = nn.Linear(dim_model // 2, num_classes)
+        self.relu = nn.ReLU()
+        
+        # CLS token for classification (learnable)
+        if pooling == 'cls':
+            self.cls_token = nn.Parameter(torch.randn(1, 1, dim_model))
+    
+    def forward(self, x, mask=None):
+        """
+        Args:
+            x: (batch, seq_len, input_dim) - input time series
+            mask: (batch, seq_len) boolean mask (True = keep, False = mask out)
+        Returns:
+            logits: (batch, num_classes) - raw logits (use with CrossEntropyLoss)
+        """
+        batch_size = x.shape[0]
+        
+        # Project input features to model dimension
+        x = self.input_projection(x)  # (batch, seq_len, dim_model)
+        x = self.positional_encoding(x)
+        x = self.dropout(x)
+        
+        # Add CLS token if using cls pooling
+        if self.pooling == 'cls':
+            cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+            x = torch.cat([cls_tokens, x], dim=1)  # (batch, seq_len+1, dim_model)
+            
+            # Extend mask to include CLS token (CLS is never masked)
+            if mask is not None:
+                cls_mask = torch.ones(batch_size, 1, device=mask.device, dtype=mask.dtype)
+                mask = torch.cat([cls_mask, mask], dim=1)
+        
+        # Pass through transformer encoder layers
+        for layer in self.encoder_layers:
+            x = layer(x, mask=mask)
+        
+        # Pool sequence to get single representation
+        if self.pooling == 'last':
+            # Use last token
+            x = x[:, -1, :]
+        elif self.pooling == 'mean':
+            # Mean pooling over sequence
+            if mask is not None:
+                # Masked mean pooling (ignore padded positions)
+                mask_expanded = mask.unsqueeze(-1).float()
+                sum_embeddings = (x * mask_expanded).sum(dim=1)
+                sum_mask = mask_expanded.sum(dim=1)
+                x = sum_embeddings / sum_mask.clamp(min=1e-9)
+            else:
+                x = x.mean(dim=1)
+        elif self.pooling == 'cls':
+            # Use CLS token output
+            x = x[:, 0, :]
+        
+        # Classification head
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
+        logits = self.fc2(x)  # (batch, num_classes)
+        
+        return logits
+    
+    def predict_proba(self, x, mask=None):
+        """
+        Get class probabilities (for inference)
+        
+        Args:
+            x: (batch, seq_len, input_dim)
+            mask: (batch, seq_len) boolean mask
+        Returns:
+            probs: (batch, num_classes) - probabilities summing to 1
+        """
+        logits = self.forward(x, mask)
+        return F.softmax(logits, dim=-1)
+    
+    def predict(self, x, mask=None):
+        """
+        Get predicted class labels (for inference)
+        
+        Args:
+            x: (batch, seq_len, input_dim)
+            mask: (batch, seq_len) boolean mask
+        Returns:
+            predictions: (batch,) - predicted class indices
+        """
+        logits = self.forward(x, mask)
+        return torch.argmax(logits, dim=-1)
+
 
 
 class EncoderLayerOptimized(nn.Module):

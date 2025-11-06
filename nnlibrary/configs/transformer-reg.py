@@ -20,8 +20,8 @@ save_path = "exp/"
 task = "regression"
 
 num_epochs = 20
-train_batch_size = 512
-eval_batch_size = 512
+train_batch_size = 1024
+eval_batch_size = 1024
 
 lr = 1e-3
 
@@ -144,7 +144,7 @@ dataset.test = DataLoaderConfig(
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "TCN-reg-sweep",
+    "name": "transformer-reg-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {
