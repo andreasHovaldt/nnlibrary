@@ -20,8 +20,8 @@ save_path = "exp/"
 task = "classification"
 
 num_epochs = 20
-train_batch_size = 512
-eval_batch_size = 512
+train_batch_size = 1024
+eval_batch_size = 1024
 
 lr = 1e-3
 
@@ -39,10 +39,10 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TransformerRegressionOptimized",
+    name = "TransformerClassificationOptimized",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        output_dim=dataset_metadata["dataset_info"]["num_classes"],
+        num_classes=dataset_metadata["dataset_info"]["num_classes"],
         dim_model = 64,
         num_heads = 4,
         num_layers = 2,
@@ -97,14 +97,12 @@ dataset = SimpleNamespace()
 dataset.info = dict(
     num_classes = 3,
     class_names = [
-        "fan_speed_cmd_10001",
-        "fresh_air_damper_cmd_10001",
-        "setpoint_supply_air_mpc_10001",
-        "setpoint_heating_mpc_10001",
-        "setpoint_cooling_mpc_10001",
+        "econ",
+        "cool",
+        "heat",
     ],
     standardize_target = False,
-    normalize_target = True,
+    normalize_target = False,
 )
 dataset.train = DataLoaderConfig(
     dataset = dict(
@@ -146,7 +144,7 @@ dataset.test = DataLoaderConfig(
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "TCN-reg-sweep",
+    "name": "transformer-cls-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {
