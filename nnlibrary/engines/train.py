@@ -266,37 +266,40 @@ class Trainer(TrainerBase):
             y_batch = y_batch.to(device=self.device, non_blocking=True)
             
         # Train model
-        self.optimizer.zero_grad(set_to_none=True) # Reset gradients
+        self.optimizer.zero_grad(set_to_none=True)
         
         with autocast(enabled=self.amp_enable, dtype=self.amp_dtype):
             # Forward pass (autocast handles appropriate dtypes)
             y_pred: torch.Tensor = self.model(X_batch)
             loss: torch.Tensor = self.loss_fn(y_pred, y_batch)
 
-        # Backward + step
-        if (self.amp_enable) and (self.amp_dtype == torch.float16) and (self.device == 'cuda') and (self.scaler is not None):
-            # Use GradScaler only for fp16 on CUDA to avoid underflow
-            # The “scale” is a multiplier applied to the loss before backward to make gradients larger and avoid FP16 underflow; then it’s divided back out before the optimizer step.
-            prev_scale = self.scaler.get_scale() # prev_scale is a snapshot of the dynamic scale before an update, this way you can tell if an overflow occurred. If the scale has decreased next time, we know under/overflow occured
+        # # Backward + step
+        if self.amp_enable:
             self.scaler.scale(loss).backward()
+        else:
+            loss.backward()
+        
+        if self.amp_enable:
+            self.scaler.unscale_(self.optimizer)
             
-            # NOTE: If gradient clipping is ever implemented, call self.scaler.unscale_(self.optimizer) then clip
+            if self.cfg.clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.clip_grad)
             
-            self.scaler.step(self.optimizer) # This only performas a step if no inf/nan values are found in the gradients
-            self.scaler.update() # If a step was skipped, the scaler decreases the scale for next iteration, to hopefully keep the gradients within float16 precision
+            self.scaler.step(self.optimizer)
+            scale = self.scaler.get_scale()
+            self.scaler.update()
             
-            # Only step scheduler if optimizer step wasn't skipped due to overflow
-            if self.scheduler is not None and self.scaler.get_scale() >= prev_scale:
+            if scale <= self.scaler.get_scale():
                 self.scheduler.step()
             else:
-                self.logger.info("Optimizer step was skipped due to over/underflow!")
-                self._scaler_was_activated = True
+                self.logger.debug("Optimizer step was skipped due changing scale.")
+        
         else:
-            # bf16 or non-AMP: plain backward
-            loss.backward()
+            if self.cfg.clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.clip_grad)
+            
             self.optimizer.step()
-            if self.scheduler is not None:
-                self.scheduler.step()
+            self.scheduler.step()
 
         # Log the train loss
         self.info["loss_iter"] = loss.item()
@@ -305,8 +308,7 @@ class Trainer(TrainerBase):
     def before_epoch(self):
         # Make sure the model is in training mode at the start of every epoch
         # (important if any validation/eval toggled it previously)
-        if hasattr(self, "model") and isinstance(self.model, nn.Module):
-            self.model.train()
+        self.model.train()
         self.info["loss_epoch_total"] = 0
         return super().before_epoch()
     
@@ -314,16 +316,9 @@ class Trainer(TrainerBase):
         self.info["current_lr"] = self.scheduler.get_last_lr()
         return super().before_step()
     
-    
     def after_epoch(self):
         self.info["loss_epoch_avg"] = self.info["loss_epoch_total"] / len(self.trainloader)
         return super().after_epoch()
-    
-    def after_train(self):
-        if getattr(self, '_scaler_was_activated', False):
-            self.logger.info("The scaler was utilized during this training run. This means that either over or underflow was detected in the gradients.")
-        return super().after_train()
-
 
     def build_model(self, model_config: Union[BaseConfig, Dict]) -> nn.Module:
         """Build model from configuration.

@@ -49,7 +49,7 @@ model_config = dict(
         dim_ff = 256,
         max_seq_length=dataset_metadata["temporal_settings"]["window"],
         dropout=0.1,
-        pooling="last",
+        pooling="cls",
     )
 )
 
