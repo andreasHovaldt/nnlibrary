@@ -93,11 +93,10 @@ scheduler = dict( # 'optimizer' should not be passed in args
 #############################################
 dataset = SimpleNamespace()
 dataset.info = dict(
-    num_classes = 3,
+    num_classes = 4,
     class_names = [
         "fan_speed_cmd_10001",
         "fresh_air_damper_cmd_10001",
-        "setpoint_supply_air_mpc_10001",
         "setpoint_heating_mpc_10001",
         "setpoint_cooling_mpc_10001",
     ],
