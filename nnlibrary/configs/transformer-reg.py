@@ -13,7 +13,7 @@ from .__base__ import DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset5-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-regression-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
