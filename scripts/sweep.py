@@ -114,7 +114,13 @@ def sweeper_func(config_name: str, sweep_root: Path):
     trainer.train()
     
     # Sweep metrics
-    sweep_metrics = ['loss','mae', 'rmse', 'r2_score'] # FIXME: Make this accessible when calling the script, or make it defineable in the config being swept
+    if cfg.task.lower() == 'regression':
+        sweep_metrics = ['loss','mae', 'rmse', 'r2_score'] # FIXME: Make this accessible when calling the script, or make it defineable in the config being swept
+    elif cfg.task.lower() == 'classification':
+        sweep_metrics = ['loss', 'avg_sample_accuracy', 'avg_class_accuracy']
+    else: 
+        raise ValueError("Config task must be either 'classification' or 'regression'!")
+    
     sweep_log_dict = {metric_name: trainer.info["test_result"][metric_name] for metric_name in sweep_metrics}
     
     run.log(data=sweep_log_dict)

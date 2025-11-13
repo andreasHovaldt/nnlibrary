@@ -13,15 +13,15 @@ from .__base__ import DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset5-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-regression-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
 task = "regression"
 
-num_epochs = 10
-train_batch_size = 512
-eval_batch_size = 512
+num_epochs = 20
+train_batch_size = 1024
+eval_batch_size = 1024
 
 lr = 1e-3
 
@@ -39,20 +39,19 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TCNRegression",
+    name = "TransformerRegressionOptimized",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        sequence_length=dataset_metadata["temporal_settings"]["window"],
-        num_classes=dataset_metadata["dataset_info"]["num_classes"],
-        regression_head_hidden_dim=64,
-        hidden_layer_sizes=[64, 64, 128, 128],
-        kernel_size=3,
-        dropout=0.3,
-        dropout_type="channel",
+        output_dim=dataset_metadata["dataset_info"]["num_classes"],
+        dim_model = 64,
+        num_heads = 4,
+        num_layers = 2,
+        dim_ff = 256,
+        max_seq_length=dataset_metadata["temporal_settings"]["window"],
+        dropout=0.1,
+        pooling="last",
     )
 )
-
-
 
 #############################################
 ### Loss function Config ####################
@@ -144,7 +143,7 @@ dataset.test = DataLoaderConfig(
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "TCN-reg-sweep",
+    "name": "transformer-reg-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {
