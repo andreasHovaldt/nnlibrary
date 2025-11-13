@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torch.amp.grad_scaler import GradScaler
 
 import nnlibrary.models
 import nnlibrary.datasets
@@ -145,6 +146,7 @@ class Trainer(TrainerBase):
         self.device: str = self.cfg.device
         self.amp_enable: bool = self.cfg.amp_enable
         self.amp_dtype: torch.dtype = AMP_DTYPES[self.cfg.amp_dtype]
+        self.scaler = GradScaler(enabled=(self.amp_enable and self.amp_dtype == torch.float16 and self.device == 'cuda'))
         
         self.model = self.build_model(self.cfg.model_config)
         self.logger.debug("Successfully built model!")
@@ -264,26 +266,49 @@ class Trainer(TrainerBase):
             y_batch = y_batch.to(device=self.device, non_blocking=True)
             
         # Train model
+        self.optimizer.zero_grad(set_to_none=True)
+        
         with autocast(enabled=self.amp_enable, dtype=self.amp_dtype):
-            # Forward pass
-            self.optimizer.zero_grad()
+            # Forward pass (autocast handles appropriate dtypes)
             y_pred: torch.Tensor = self.model(X_batch)
             loss: torch.Tensor = self.loss_fn(y_pred, y_batch)
-            
-            # Backward pass
+
+        # # Backward + step
+        if self.amp_enable:
+            self.scaler.scale(loss).backward()
+        else:
             loss.backward()
+        
+        if self.amp_enable:
+            self.scaler.unscale_(self.optimizer)
+            
+            if self.cfg.clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.clip_grad)
+            
+            self.scaler.step(self.optimizer)
+            scale = self.scaler.get_scale()
+            self.scaler.update()
+            
+            if scale <= self.scaler.get_scale():
+                self.scheduler.step()
+            else:
+                self.logger.debug("Optimizer step was skipped due changing scale.")
+        
+        else:
+            if self.cfg.clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.clip_grad)
+            
             self.optimizer.step()
             self.scheduler.step()
-            
-            # Log the train loss
-            self.info["loss_iter"] = loss.item()
-            self.info["loss_epoch_total"] += loss.item()
+
+        # Log the train loss
+        self.info["loss_iter"] = loss.item()
+        self.info["loss_epoch_total"] += loss.item()
             
     def before_epoch(self):
         # Make sure the model is in training mode at the start of every epoch
         # (important if any validation/eval toggled it previously)
-        if hasattr(self, "model") and isinstance(self.model, nn.Module):
-            self.model.train()
+        self.model.train()
         self.info["loss_epoch_total"] = 0
         return super().before_epoch()
     
@@ -291,11 +316,9 @@ class Trainer(TrainerBase):
         self.info["current_lr"] = self.scheduler.get_last_lr()
         return super().before_step()
     
-    
     def after_epoch(self):
         self.info["loss_epoch_avg"] = self.info["loss_epoch_total"] / len(self.trainloader)
         return super().after_epoch()
-
 
     def build_model(self, model_config: Union[BaseConfig, Dict]) -> nn.Module:
         """Build model from configuration.

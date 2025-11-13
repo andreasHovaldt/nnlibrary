@@ -20,6 +20,7 @@ lr = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 amp_enable = True
 amp_dtype = "float16"
+clip_grad = None # Gradient clipping, None to disable, set to a float to enable, common range between 0.5 -> 5.0
 
 enable_tensorboard = True
 enable_wandb = True

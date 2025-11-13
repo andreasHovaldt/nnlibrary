@@ -13,15 +13,15 @@ from .__base__ import DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset5-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-classification-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
-task = "regression"
+task = "classification"
 
-num_epochs = 10
-train_batch_size = 512
-eval_batch_size = 512
+num_epochs = 20
+train_batch_size = 1024
+eval_batch_size = 1024
 
 lr = 1e-3
 
@@ -39,27 +39,28 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TCNRegression",
+    name = "TransformerClassificationOptimized",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        sequence_length=dataset_metadata["temporal_settings"]["window"],
         num_classes=dataset_metadata["dataset_info"]["num_classes"],
-        regression_head_hidden_dim=64,
-        hidden_layer_sizes=[64, 64, 128, 128],
-        kernel_size=3,
-        dropout=0.3,
-        dropout_type="channel",
+        dim_model = 64,
+        num_heads = 4,
+        num_layers = 2,
+        dim_ff = 256,
+        max_seq_length=dataset_metadata["temporal_settings"]["window"],
+        dropout=0.1,
+        pooling="cls",
     )
 )
-
-
 
 #############################################
 ### Loss function Config ####################
 #############################################
 loss_fn = dict(
-    name="MSELoss",
-    args=dict()
+    name="CrossEntropyLoss",
+    args=dict(
+        weight = [0.25, 0.50, 10.00],
+    )
 )
 
 
@@ -94,15 +95,14 @@ scheduler = dict( # 'optimizer' should not be passed in args
 #############################################
 dataset = SimpleNamespace()
 dataset.info = dict(
-    num_classes = 4,
+    num_classes = 3,
     class_names = [
-        "fan_speed_cmd_10001",
-        "fresh_air_damper_cmd_10001",
-        "setpoint_heating_mpc_10001",
-        "setpoint_cooling_mpc_10001",
+        "econ",
+        "cool",
+        "heat",
     ],
     standardize_target = False,
-    normalize_target = True,
+    normalize_target = False,
 )
 dataset.train = DataLoaderConfig(
     dataset = dict(
@@ -144,7 +144,7 @@ dataset.test = DataLoaderConfig(
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "TCN-reg-sweep",
+    "name": "transformer-cls-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {

@@ -92,7 +92,6 @@ def _resolve_run_dirs(cfg: Any, run_name: str) -> Tuple[Path, Path, Path]:
     run_dir = PROJECT_ROOT / cfg.save_path / cfg.dataset_name / model_name / run_name
     model_dir = run_dir / 'model'
     onnx_dir = run_dir / 'onnx'
-    onnx_dir.mkdir(parents=True, exist_ok=True)
     return run_dir, model_dir, onnx_dir
 
 
@@ -102,7 +101,7 @@ def _restore_checkpoint(model: torch.nn.Module, cfg: Any, device: str, run_name:
     last_path = model_dir / 'model_last.pth'
     ckpt_path = best_path if best_path.exists() else last_path
     if not ckpt_path.exists():
-        raise SystemExit(f"No checkpoint found at {best_path} or {last_path}")
+        raise SystemExit(f"No checkpoint found for run '{run_name}'. Expected one of: {best_path} or {last_path}")
     ckpt = torch.load(ckpt_path, map_location=device)
     state_dict = ckpt.get('state_dict', ckpt)
     model.load_state_dict(state_dict)
@@ -258,6 +257,7 @@ def export_onnx(
     input_name: str = 'input',
     output_name: str = 'output',
     train_mode: bool = False,
+    opset_version: Optional[int] = None
 ) -> None:
     # Set desired mode for export
     if train_mode:
@@ -273,8 +273,10 @@ def export_onnx(
         f=str(save_path),
         input_names=[input_name],
         output_names=[output_name],
+        opset_version=opset_version,
         dynamo=True,
         dynamic_shapes=dynamic_shapes if dynamic_shapes else None,
+        verbose=True
     )
 
 
@@ -290,6 +292,7 @@ def main() -> None:
     parser.add_argument('--filename', type=str, default=None, help="Output filename (defaults to <ModelName>.onnx)")
     
     parser.add_argument('--train-mode', action='store_true', help="Export the model in training mode (default: eval mode)")
+    parser.add_argument('--opset-version', type=int, help="The ONNX opset version to use for the exported onnx model. Default: newest possible (For older versions of onnxruntime, refer to this website: https://onnxruntime.ai/docs/reference/compatibility.html)")
     
     parser.add_argument('--batch-size', type=int, default=None, help="Override dummy input batch size (optional; default from config)")
     parser.add_argument('--feature-dim', type=int, default=None, help="Override dummy input feature dimension (optional; default from metadata/config)")
@@ -323,8 +326,8 @@ def main() -> None:
     model.to('cpu').eval()
 
     # Build dynamic axes
-    input_name = 'input'
-    output_name = 'output'
+    input_name = 'x'
+    output_name = 'y'
     dynamic_shapes = build_dynamic_signatures(
         shape_info, input_name, args.dynamic_batch, args.dynamic_seq
     )
@@ -336,7 +339,17 @@ def main() -> None:
 
     # Export
     print(f"Exporting ONNX to: {save_path}")
-    export_onnx(model, example_input, save_path, dynamic_shapes, input_name, output_name, train_mode=args.train_mode)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    export_onnx(
+        model=model, 
+        example_input=example_input, 
+        save_path=save_path, 
+        dynamic_shapes=dynamic_shapes, 
+        input_name=input_name, 
+        output_name=output_name, 
+        train_mode=args.train_mode,
+        opset_version=args.opset_version,
+    )
 
     # Always validate the exported ONNX
     try:
