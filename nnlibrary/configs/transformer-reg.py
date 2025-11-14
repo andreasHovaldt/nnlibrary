@@ -1,4 +1,5 @@
 import json
+import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 from nnlibrary.engines import hooks as h
@@ -102,7 +103,38 @@ dataset.info = dict(
     ],
     standardize_target = False,
     normalize_target = True,
+    
+    transforms = None,
+    
+    target_transforms = [
+        # dict(
+        #     name = 'Absolute2Relative', # FIXME: Theres a problem since the setpoints change during the dataset
+        #     args = dict(
+        #         zone_sp_min = float,
+        #         zone_sp_max = float,
+        #         heating_idx = 2,
+        #         cooling_idx = 3,
+        #     ),
+        # ),
+        
+        dict(
+            name = 'MinMaxNormalize',
+            args = dict(
+                min_vals=np.load(data_root / "stats" / "target_min.npy").astype(float).tolist(),
+                max_vals=np.load(data_root / "stats" / "target_max.npy").astype(float).tolist(),
+            ),
+        ),
+        
+        # dict(
+        #     name = 'Standardize',
+        #     args = dict(
+        #         mean=np.load(data_root / "stats" / "target_mean.npy").astype(float).tolist(),
+        #         std=np.load(data_root / "stats" / "target_std.npy").astype(float).tolist(),
+        #     ),
+        # ),
+    ]
 )
+
 dataset.train = DataLoaderConfig(
     dataset = dict(
         name = "MpcDatasetHDF5",

@@ -1,23 +1,21 @@
 import os
 import time
+import wandb
+import torch
 import shutil
 import numpy as np
 import datetime as dt
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union
-import wandb
-import torch
-from nnlibrary.engines.eval import ClassificationEvaluator, RegressionEvaluator
-import nnlibrary.utils.comm as comm
-from nnlibrary.utils.operations import Standardize, MinMaxNormalize
+from typing import TYPE_CHECKING, Optional
 
-if TYPE_CHECKING:
-    from .train import TrainerBase, Trainer
+import nnlibrary.utils.comm as comm
+from nnlibrary.engines.eval import ClassificationEvaluator, RegressionEvaluator
+from nnlibrary.utils.transforms import TransformBase
 
 
 class Hookbase:
     """
-    Base class for hooks that can be registered with :class:`TrainerBase`.
+    Base class for hooks.
     
     NOTE: self.trainer cannot be accessed duing hook __init__
     
@@ -227,7 +225,7 @@ class ValidationHook(Hookbase):
                     
                     # Provide inverse-transform for calculating on original value ranges if available
                     inv_transform = None
-                    transform = getattr(self.trainer, 'target_transform', None)
+                    transform: Optional[TransformBase] = getattr(self.trainer, 'target_transform', None)
                     if transform is not None and hasattr(transform, 'inverse_transform'):
                         inv_transform = transform.inverse_transform
                     
@@ -318,7 +316,7 @@ class TestHook(Hookbase):
                     
                     # Provide inverse-transform for calculating on original value ranges if available
                     inv_transform = None
-                    transform: Optional[Union[Standardize, MinMaxNormalize]] = getattr(self.trainer, 'target_transform', None)
+                    transform: Optional[TransformBase] = getattr(self.trainer, 'target_transform', None)
                     if transform is not None and hasattr(transform, 'inverse_transform'):
                         inv_transform = transform.inverse_transform
                     
