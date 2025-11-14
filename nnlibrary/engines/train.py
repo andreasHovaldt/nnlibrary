@@ -8,7 +8,7 @@ import random
 import numpy as np
 
 from pathlib import Path
-from typing import Any, Union, Dict
+from typing import Any, Union, Dict, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -21,6 +21,7 @@ import nnlibrary.datasets
 import nnlibrary.utils.loss
 import nnlibrary.utils.schedulers
 import nnlibrary.utils.comm as comm
+import nnlibrary.utils.transforms as transforms
 
 from .hooks import Hookbase
 
@@ -363,7 +364,12 @@ class Trainer(TrainerBase):
             raise ValueError(f"Model '{model_name}' not found in nnlibrary.models")
 
 
-    def build_dataset(self, dataset_config: Union[BaseConfig, Dict], standardize_target = False, normalize_target = False) -> Dataset:
+    def build_dataset(
+        self, 
+        dataset_config: Union[BaseConfig, Dict], 
+        input_transforms: Optional[Sequence[dict[str, Any]]] = None,
+        target_transforms: Optional[Sequence[dict[str, Any]]] = None,
+    ) -> Dataset:
         """Build dataset from configuration.
     
         Args:
@@ -389,55 +395,58 @@ class Trainer(TrainerBase):
         
         # Log the config
         self.logger.debug(f"Building dataset with following config:\n  name: {dataset_name}\n  args: {dataset_args}")
-        
-        # Make sure both standardization and normalization isn't enabled
-        assert not (standardize_target and normalize_target), "Cannot use both standardize_target and normalize_target at the same time"
-        
+                
         # Get the dataset class from the datasets module
         if hasattr(nnlibrary.datasets, dataset_name):
             dataset_class = getattr(nnlibrary.datasets, dataset_name)
-            if (not standardize_target) and (not normalize_target):
+
+            # Early exit if no transforms in config
+            if (not input_transforms) and (not target_transforms):
                 return dataset_class(**dataset_args)
-            else:
-                stats_dir = self.cfg.data_root / "stats"
-                try:
-                    import numpy as np
-                    if standardize_target:
-                        from nnlibrary.utils.operations import Standardize
-                        self.target_transform = Standardize(
-                            mean=np.load(stats_dir / "target_mean.npy").astype(float).tolist(),
-                            std=np.load(stats_dir / "target_std.npy").astype(float).tolist(),
-                        )
-                        print("Using standardized targets!")
+
+            # Build input transform list
+            input_transform_objects: list = []
+            if input_transforms:
+                for input_transform in input_transforms:
+                    # Get transform spec
+                    input_transform_name = input_transform.get('name')
+                    input_transform_args = input_transform.get('args', {})
                     
-                    elif normalize_target:
-                        from nnlibrary.utils.operations import MinMaxNormalize
-                        self.target_transform = MinMaxNormalize(
-                            min_vals=np.load(stats_dir / "target_min.npy").astype(float).tolist(),
-                            max_vals=np.load(stats_dir / "target_max.npy").astype(float).tolist(),
-                        )
-                        print("Using normalized targets!")
+                    # Raise verbose errors if transform name is missing or it could not be found in the transforms module
+                    if not input_transform_name:
+                        raise ValueError(f"Input transform spec missing 'name': {input_transform}")
+                    if not hasattr(nnlibrary.utils.transforms, input_transform_name):
+                        raise ValueError(f"Input transform '{input_transform_name}' not found in nnlibrary.utils.transforms")
                     
-                    return dataset_class(target_transform=self.target_transform, **dataset_args)
-                
-                except TypeError as e:
-                    print(e)
-                    print(f"WARN: {e}!")
-                    if input("Try to continue without augmented targets? (y/n) ").lower() == 'y':
-                        print("Continuing without augmented targets...")
-                        return dataset_class(**dataset_args)
-                    else: exit()
-                
-                except FileNotFoundError as e:
-                    print(f"WARN: {e}!")
-                    if input("Continue without augmented targets? (y/n) ").lower() == 'y':
-                        print("Continuing without augmented targets..")
-                        return dataset_class(**dataset_args)
-                    else: exit()
-                
-                except Exception as e:
-                    print(e)
-                    exit()
+                    # Log the input transforms used
+                    self.logger.debug(f"Using transform:\n  name: {input_transform_name}\n  args: {input_transform_args}")
+                    
+                    # Initialize transform class and append to list
+                    input_transform_class = getattr(nnlibrary.utils.transforms, input_transform_name)
+                    input_transform_objects.append(input_transform_class(**input_transform_args))
+            
+            # Construct multi-transform composer
+            self.transform = transforms.TransformComposer(input_transform_objects) if input_transform_objects else None
+            
+
+            # Build target transform list
+            target_transform_objects: list = []
+            if target_transforms:
+                for target_transform in target_transforms:
+                    target_transform_name = target_transform.get('name')
+                    target_transform_args = target_transform.get('args', {})
+                    if not target_transform_name:
+                        raise ValueError(f"Target transform spec missing 'name': {target_transform}")
+                    if not hasattr(nnlibrary.utils.transforms, target_transform_name):
+                        raise ValueError(f"Target transform '{target_transform_name}' not found in nnlibrary.utils.transforms")
+                    self.logger.debug(f"Using transform:\n  name: {target_transform_name}\n  args: {target_transform_args}")
+                    target_transform_class = getattr(nnlibrary.utils.transforms, target_transform_name)
+                    target_transform_objects.append(target_transform_class(**target_transform_args))
+            self.target_transform = transforms.TransformComposer(target_transform_objects) if target_transform_objects else None
+
+
+            # Final dataset construction
+            return dataset_class(transform=self.transform, target_transform=self.target_transform, **dataset_args)
         else:
             raise ValueError(f"Dataset '{dataset_name}' not found in nnlibrary.datasets")
     
@@ -445,8 +454,8 @@ class Trainer(TrainerBase):
     def build_dataloader(self, dataloader_config: DataLoaderConfig, batch_size: int) -> DataLoader: # TODO: Make it able to accept a dict as config input
         dataset: Dataset[Any] = self.build_dataset(
             dataset_config=dataloader_config.dataset, 
-            standardize_target=self.cfg.dataset.info.get("standardize_target", False),
-            normalize_target=self.cfg.dataset.info.get("normalize_target", False),
+            input_transforms=self.cfg.dataset.info.get("transforms", None),
+            target_transforms=self.cfg.dataset.info.get("target_transforms", None)
         )
         
         # Log the config
