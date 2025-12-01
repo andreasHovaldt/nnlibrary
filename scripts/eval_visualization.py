@@ -106,7 +106,7 @@ def _build_target_transform(cfg: Any) -> Tuple[Optional[Callable[[torch.Tensor],
     stats_dir = Path(data_root) / 'stats'
 
     try:
-        from nnlibrary.utils.operations import Standardize, MinMaxNormalize
+        from nnlibrary.utils.transforms import Standardize, MinMaxNormalize
         if standardize:
             transform = Standardize(
                 mean=np.load(stats_dir / 'target_mean.npy').astype(float).tolist(),
