@@ -30,9 +30,6 @@ validation_metric_higher_is_better = False
 
 seed = 42
 
-# TODO CONFIGS
-# weight = None should be a path to a pretrained params dict
-
 
 
 #############################################
@@ -101,9 +98,10 @@ dataset.info = dict(
         "cool",
         "heat",
     ],
-    standardize_target = False,
-    normalize_target = False,
+    input_transforms = None,
+    target_transforms = None,
 )
+
 dataset.train = DataLoaderConfig(
     dataset = dict(
         name = "MpcDatasetHDF5",

@@ -42,5 +42,5 @@ hooks = [
 # Note: some CUDA ops are inherently non-deterministic; enabling full determinism may impact performance
 seed = None
 
-# TODO CONFIGS
-# weight = None
+# TODO: CONFIGS
+# weight = None # should be a path to a pretrained params dict

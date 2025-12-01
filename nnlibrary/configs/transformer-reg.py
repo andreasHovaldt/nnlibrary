@@ -31,9 +31,6 @@ validation_metric_higher_is_better = False
 
 seed = 42
 
-# TODO CONFIGS
-# weight = None should be a path to a pretrained params dict
-
 
 
 #############################################
@@ -101,10 +98,8 @@ dataset.info = dict(
         "setpoint_heating_mpc_10001",
         "setpoint_cooling_mpc_10001",
     ],
-    standardize_target = False,
-    normalize_target = True,
     
-    transforms = None,
+    input_transforms = None,
     
     target_transforms = [
         # dict(
