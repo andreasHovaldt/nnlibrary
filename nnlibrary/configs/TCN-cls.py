@@ -13,7 +13,7 @@ from .__base__ import BaseConfig, DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-classification-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
@@ -25,12 +25,10 @@ eval_batch_size = 512
 
 lr = 1e-3
 
-validation_metric_name = "avg_class_accuracy"
-validation_metric_higher_is_better = True
+validation_metric_name = "loss"
+validation_metric_higher_is_better = False
 
-# TODO CONFIGS
-# seed = None
-# weight = None
+seed = 42
 
 
 
@@ -107,13 +105,17 @@ dataset.info = dict(
         "econ",
         "cool",
         "heat",
-    ]
+    ],
+    input_transforms = None,
+    target_transforms = None,
 )
+
 dataset.train = DataLoaderConfig(
-    dataset = BaseConfig(
+    dataset = dict(
         name = "MpcDatasetHDF5",
         args = dict(
             hdf5_file = data_root / "train.h5",
+            task = task,
             cache_in_memory = True,
             verbose = True,
         )),
@@ -121,10 +123,11 @@ dataset.train = DataLoaderConfig(
 )
 
 dataset.val = DataLoaderConfig(
-    dataset=BaseConfig(
+    dataset=dict(
         name="MpcDatasetHDF5",
         args=dict(
             hdf5_file = data_root / "val.h5",
+            task = task,
             cache_in_memory = True,
             verbose = True,
         )),
@@ -132,12 +135,27 @@ dataset.val = DataLoaderConfig(
 )
 
 dataset.test = DataLoaderConfig(
-    dataset=BaseConfig(
+    dataset=dict(
         name="MpcDatasetHDF5",
         args=dict(
             hdf5_file = data_root / "test.h5",
+            task = task,
             cache_in_memory = True,
             verbose = True,
         )),
     shuffle=False,
 )
+
+
+# Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
+# Define the search space
+sweep_configuration = {
+    "name": "TCN-cls-sweep",
+    "method": "grid",
+    "metric": {"goal": "minimize", "name": "loss"},
+    "parameters": {
+        "num_epochs": {"values": [5, 10, 15, 20, 30]},
+        "lr": {"values": [1e-2, 1e-3, 1e-4]},
+        "train_batch_size": {"values": [256, 512, 1024, 2048]},
+    },
+}

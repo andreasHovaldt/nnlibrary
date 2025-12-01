@@ -1,4 +1,5 @@
 import json
+import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 from nnlibrary.engines import hooks as h
@@ -13,7 +14,7 @@ from .__base__ import DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset5-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-regression-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
@@ -29,9 +30,6 @@ validation_metric_name = "loss"
 validation_metric_higher_is_better = False
 
 seed = 42
-
-# TODO CONFIGS
-# weight = None should be a path to a pretrained params dict
 
 
 
@@ -101,9 +99,28 @@ dataset.info = dict(
         "setpoint_heating_mpc_10001",
         "setpoint_cooling_mpc_10001",
     ],
-    standardize_target = False,
-    normalize_target = True,
+    
+    input_transforms = None,
+    
+    target_transforms = [
+        dict(
+            name = 'MinMaxNormalize',
+            args = dict(
+                min_vals=np.load(data_root / "stats" / "target_min.npy").astype(float).tolist(),
+                max_vals=np.load(data_root / "stats" / "target_max.npy").astype(float).tolist(),
+            ),
+        ),
+        
+        # dict(
+        #     name = 'Standardize',
+        #     args = dict(
+        #         mean=np.load(data_root / "stats" / "target_mean.npy").astype(float).tolist(),
+        #         std=np.load(data_root / "stats" / "target_std.npy").astype(float).tolist(),
+        #     ),
+        # ),
+    ]
 )
+
 dataset.train = DataLoaderConfig(
     dataset = dict(
         name = "MpcDatasetHDF5",
