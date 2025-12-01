@@ -454,7 +454,7 @@ class Trainer(TrainerBase):
     def build_dataloader(self, dataloader_config: DataLoaderConfig, batch_size: int) -> DataLoader: # TODO: Make it able to accept a dict as config input
         dataset: Dataset[Any] = self.build_dataset(
             dataset_config=dataloader_config.dataset, 
-            input_transforms=self.cfg.dataset.info.get("transforms", None),
+            input_transforms=self.cfg.dataset.info.get("input_transforms", None),
             target_transforms=self.cfg.dataset.info.get("target_transforms", None)
         )
         
@@ -629,13 +629,6 @@ class Trainer(TrainerBase):
     
     def build_wandb_run(self) -> wandb.Run | None:
         if self.cfg.enable_wandb and comm.is_main_process():
-            
-            if self.cfg.dataset.info.get("standardize_target", False):
-                target_transform = 'standardization'
-            elif self.cfg.dataset.info.get("normalize_target", False):
-                target_transform = 'normalization'
-            else:
-                target_transform = None
 
             # If an active W&B run already exists (e.g., created by a sweep script), reuse it
             if wandb.run is not None:
@@ -647,7 +640,6 @@ class Trainer(TrainerBase):
                     existing_cfg = wandb.run.config
                     supplemental_cfg = dict(
                         dataset=f"{self.cfg.dataset_name}/{self.cfg.data_root.name}",
-                        target_transform=target_transform,
                         task=self.cfg.task,
                         architecture=self.model_module,
                         model_name=self.cfg.model_config.name,
@@ -683,7 +675,6 @@ class Trainer(TrainerBase):
                 settings=wandb.Settings(api_key=self.cfg.wandb_key) if self.cfg.wandb_key else None,
                 config=dict(
                     dataset=f"{self.cfg.dataset_name}/{self.cfg.data_root.name}",  # self.cfg.dataset_name,
-                    target_transform=target_transform,
                     task=self.cfg.task,
                     architecture=self.model_module,
                     model_name=self.cfg.model_config.name,
