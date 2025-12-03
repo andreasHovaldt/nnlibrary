@@ -1,0 +1,165 @@
+import random
+import torch
+from pathlib import Path
+from typing import Optional, Union, List
+
+REPO_ROOT = Path(__file__).parent.parent.parent
+
+AMP_DTYPES = {
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+}
+
+ADJECTIVE_LIST = [
+    'able', 'accepting', 'accomplished', 'accurate', 'active', 'adaptable', 'adept', 'admirable',
+    'adorable', 'adventurous', 'affectionate', 'agile', 'agreeable', 'alert', 'alive', 'amazing',
+    'ambitious', 'amiable', 'ample', 'amusing', 'ancient', 'angelic', 'animated', 'aquatic',
+    'arctic', 'artistic', 'assertive', 'assured', 'astonishing', 'athletic', 'attentive', 'attractive',
+    'authentic', 'available', 'aware', 'awesome', 'balanced', 'beautiful', 'beloved', 'beneficial',
+    'benevolent', 'better', 'big', 'biodegradable', 'blessed', 'blissful', 'bold', 'bouncy',
+    'boundless', 'brainy', 'brave', 'breezy', 'brief', 'bright', 'brilliant', 'brisk',
+    'bubbly', 'busy', 'calm', 'capable', 'carefree', 'careful', 'caring', 'celestial',
+    'charming', 'cheerful', 'civic', 'civil', 'classic', 'clean', 'clear', 'clever',
+    'coherent', 'colorful', 'comfortable', 'comic', 'compassionate', 'competent', 'complete', 'composed',
+    'confident', 'connected', 'conscious', 'content', 'cool', 'cooperative', 'courageous', 'courteous',
+    'cozy', 'creative', 'credible', 'crisp', 'crystalline', 'curious', 'daring', 'dazzling',
+    'decisive', 'dedicated', 'deep', 'delicate', 'delicious', 'delightful', 'determined', 'devoted',
+    'diligent', 'discreet', 'distinct', 'diverse', 'divine', 'dreamy', 'dynamic', 'eager',
+    'earnest', 'easy', 'eclectic', 'economic', 'ecstatic', 'educated', 'effective', 'efficient',
+    'elastic', 'elated', 'elegant', 'eloquent', 'empathetic', 'empowered', 'enchanted', 'encouraging',
+    'endless', 'energetic', 'engaging', 'enjoyable', 'enlightened', 'enormous', 'enthusiastic', 'epic',
+    'equal', 'essential', 'established', 'eternal', 'ethical', 'everlasting', 'excellent', 'exciting',
+    'exotic', 'expansive', 'experienced', 'expert', 'exquisite', 'extraordinary', 'fabulous', 'fair',
+    'faithful', 'famous', 'fancy', 'fantastic', 'fascinating', 'fashionable', 'fast', 'fearless',
+    'festive', 'fiery', 'fine', 'firm', 'fit', 'flawless', 'flexible', 'flowing',
+    'fluent', 'focused', 'fond', 'fortunate', 'fragrant', 'frank', 'free', 'fresh',
+    'friendly', 'frugal', 'fun', 'functional', 'funny', 'futuristic', 'generous', 'gentle',
+    'genuine', 'gifted', 'giving', 'glad', 'glamorous', 'gleaming', 'glistening', 'glorious',
+    'glowing', 'golden', 'good', 'graceful', 'gracious', 'grand', 'grateful', 'great',
+    'green', 'gregarious', 'grounded', 'growing', 'guided', 'handy', 'happy', 'hard',
+    'hardworking', 'harmless', 'harmonious', 'healthy', 'heartfelt', 'hearty', 'heavenly', 'helpful',
+    'heroic', 'honest', 'honorable', 'hopeful', 'hospitable', 'humble', 'humorous', 'ideal',
+    'imaginative', 'immaculate', 'immense', 'impartial', 'important', 'impressive', 'improved', 'incredible',
+    'independent', 'industrious', 'infinite', 'influential', 'ingenious', 'innovative', 'insightful', 'inspired',
+    'inspiring', 'instant', 'instinctive', 'integral', 'intelligent', 'intense', 'intentional', 'interactive',
+    'interesting', 'intuitive', 'inventive', 'invigorating', 'invincible', 'invisible', 'joyful', 'joyous',
+    'jubilant', 'just', 'keen', 'kind', 'knowledgeable', 'large', 'laudable', 'leading',
+    'lean', 'learned', 'legendary', 'legitimate', 'light', 'likeable', 'limitless', 'literate',
+    'lively', 'logical', 'lovable', 'lovely', 'loving', 'loyal', 'lucid', 'lucky',
+    'luminous', 'luxurious', 'magical', 'magnificent', 'majestic', 'meaningful', 'measured', 'meditative',
+    'mellow', 'melodic', 'memorable', 'merciful', 'merry', 'methodical', 'meticulous', 'mighty',
+    'mindful', 'miraculous', 'modern', 'modest', 'moral', 'motivated', 'musical', 'mystical',
+    'natural', 'neat', 'needed', 'nice', 'nimble', 'noble', 'noteworthy', 'nourishing',
+    'novel', 'nurturing', 'obedient', 'objective', 'observant', 'online', 'open', 'optimal',
+    'optimistic', 'orderly', 'organic', 'organized', 'original', 'outstanding', 'pacific', 'passionate',
+    'patient', 'peaceful', 'perfect', 'persistent', 'pleasant', 'pleased', 'pleasing', 'plentiful',
+    'poetic', 'poised', 'polished', 'polite', 'popular', 'positive', 'powerful', 'practical',
+    'pragmatic', 'precious', 'precise', 'premier', 'prepared', 'present', 'pretty', 'priceless',
+    'primary', 'prime', 'principled', 'proactive', 'productive', 'professional', 'profound', 'progressive',
+    'prominent', 'prompt', 'proper', 'prosperous', 'protective', 'proud', 'proven', 'prudent',
+    'punctual', 'pure', 'purposeful', 'qualified', 'quality', 'quick', 'quiet', 'radiant',
+    'rapid', 'rational', 'ready', 'real', 'realistic', 'reasonable', 'refined', 'reflective',
+    'refreshing', 'regal', 'regular', 'relaxed', 'relevant', 'reliable', 'remarkable', 'renewed',
+    'reputable', 'resilient', 'resourceful', 'respectful', 'responsible', 'responsive', 'restful', 'rich',
+    'right', 'rigorous', 'robust', 'romantic', 'rooted', 'rosy', 'royal', 'sacred',
+    'safe', 'sage', 'sapphire', 'satisfied', 'savvy', 'scientific', 'secure', 'selective',
+    'sensible', 'sensitive', 'serene', 'serious', 'sharp', 'shining', 'significant', 'silent',
+    'silver', 'simple', 'sincere', 'skilled', 'skillful', 'sleek', 'smart', 'smiling',
+    'smooth', 'social', 'soft', 'solar', 'solemn', 'solid', 'sophisticated', 'soulful',
+    'sound', 'spacious', 'special', 'spectacular', 'speedy', 'spirited', 'spiritual', 'splendid',
+    'spontaneous', 'stable', 'standard', 'star', 'stellar', 'sterling', 'stimulating', 'stirring',
+    'stoic', 'strategic', 'strong', 'studious', 'stunning', 'stylish', 'sublime', 'substantial',
+    'successful', 'sufficient', 'sunny', 'super', 'superb', 'superior', 'supportive', 'supreme',
+    'sure', 'sustainable', 'sweet', 'swift', 'symbolic', 'sympathetic', 'systematic', 'tactful',
+    'talented', 'tenacious', 'tender', 'terrific', 'thankful', 'therapeutic', 'thorough', 'thoughtful',
+    'thriving', 'tidy', 'timeless', 'tireless', 'tolerant', 'tough', 'tranquil', 'transparent',
+    'tremendous', 'trim', 'triumphant', 'true', 'trustworthy', 'truthful', 'ultimate', 'unbeatable',
+    'unbiased', 'understanding', 'unified', 'unique', 'united', 'universal', 'unlimited', 'unselfish',
+    'upbeat', 'uplifting', 'upright', 'urbane', 'useful', 'utmost', 'valiant', 'valid',
+    'valuable', 'vast', 'venerable', 'versatile', 'vibrant', 'victorious', 'vigilant', 'vigorous',
+    'virtuous', 'visionary', 'vital', 'vivacious', 'vivid', 'voluntary', 'warm', 'welcoming',
+    'whole', 'wholesome', 'willing', 'winning', 'wise', 'witty', 'wonderful', 'worldly',
+    'worthy', 'youthful', 'zealous', 'zesty'
+]
+
+NOUN_LIST = [
+    'aardvark', 'albatross', 'alligator', 'alpaca', 'anchor', 'antelope', 'anvil', 'armadillo',
+    'arrow', 'avalanche', 'axe', 'badger', 'banner', 'barracuda', 'basilisk', 'bat',
+    'beacon', 'bear', 'beaver', 'bee', 'beetle', 'bison', 'blade', 'blizzard',
+    'bobcat', 'boulder', 'bridge', 'buffalo', 'butterfly', 'cactus', 'camel', 'canary',
+    'canyon', 'cardinal', 'caribou', 'castle', 'catalyst', 'caterpillar', 'cedar', 'cheetah',
+    'chimera', 'chipmunk', 'citadel', 'cliff', 'cloud', 'cobra', 'comet', 'compass',
+    'condor', 'constellation', 'coral', 'coyote', 'crab', 'crane', 'crater', 'cricket',
+    'crocodile', 'crow', 'crystal', 'current', 'cyclone', 'cypress', 'dagger', 'dawn',
+    'deer', 'delta', 'desert', 'diamond', 'dolphin', 'dove', 'dragon', 'dragonfly',
+    'drifter', 'dune', 'eagle', 'earthquake', 'eclipse', 'eel', 'elephant', 'elk',
+    'ember', 'emerald', 'enigma', 'equinox', 'everest', 'expedition', 'falcon', 'fawn',
+    'ferry', 'finch', 'fire', 'firefly', 'fjord', 'flame', 'fleet', 'flint',
+    'forest', 'forge', 'fortress', 'fountain', 'fox', 'frontier', 'frost', 'galaxy',
+    'gazelle', 'gecko', 'glacier', 'glade', 'goat', 'granite', 'grassland', 'griffin',
+    'grove', 'guardian', 'gull', 'hammer', 'harbor', 'hare', 'harrier', 'hawk',
+    'haven', 'hedgehog', 'heron', 'highland', 'horizon', 'hornet', 'horse', 'hummingbird',
+    'hurricane', 'hyena', 'ibex', 'ibis', 'iceberg', 'iguana', 'island', 'ivory',
+    'jackal', 'jade', 'jaguar', 'javelin', 'jay', 'jellyfish', 'jewel', 'journey',
+    'jungle', 'kangaroo', 'kingfisher', 'kite', 'koala', 'kraken', 'lagoon', 'lake',
+    'lance', 'lantern', 'lark', 'leopard', 'lighthouse', 'lightning', 'lion', 'lizard',
+    'llama', 'locust', 'lotus', 'lynx', 'magpie', 'mammoth', 'manta', 'maple',
+    'marlin', 'marten', 'meadow', 'mesa', 'meteor', 'midnight', 'mirage', 'mist',
+    'monastery', 'mongoose', 'monkey', 'monsoon', 'moose', 'morning', 'moss', 'moth',
+    'mountain', 'mustang', 'narwhal', 'nebula', 'needle', 'nest', 'newt', 'nightingale',
+    'nimbus', 'oasis', 'oak', 'obelisk', 'observer', 'ocean', 'octopus', 'onyx',
+    'opal', 'oracle', 'orca', 'orchid', 'oriole', 'osprey', 'otter', 'owl',
+    'oxide', 'oyster', 'paladin', 'palm', 'panda', 'panther', 'parrot', 'passage',
+    'path', 'peacock', 'peak', 'pearl', 'pegasus', 'pelican', 'penguin', 'peregrine',
+    'phantom', 'phoenix', 'pike', 'pillar', 'pine', 'pinnacle', 'pioneer', 'planet',
+    'plateau', 'plaza', 'plover', 'porcupine', 'portal', 'prairie', 'prism', 'puma',
+    'pyramid', 'python', 'quasar', 'quest', 'rabbit', 'raccoon', 'rail', 'rain',
+    'raven', 'ray', 'reef', 'reindeer', 'remnant', 'rhino', 'ridge', 'rift',
+    'river', 'robin', 'rocket', 'rook', 'rover', 'ruby', 'saber', 'salamander',
+    'salmon', 'sanctuary', 'sapphire', 'savanna', 'seal', 'seeker', 'sentinel', 'serpent',
+    'shadow', 'shark', 'shield', 'shrine', 'sierra', 'silver', 'skylark', 'snow',
+    'solstice', 'sparrow', 'spear', 'specter', 'sphinx', 'spider', 'spire', 'spirit',
+    'spring', 'spruce', 'squirrel', 'starling', 'station', 'steppe', 'stone', 'storm',
+    'stream', 'summit', 'sun', 'sunrise', 'sunset', 'swallow', 'swan', 'swift',
+    'sword', 'swordfish', 'talon', 'temple', 'tempest', 'tern', 'thunder', 'tide',
+    'tiger', 'timber', 'titan', 'toad', 'topaz', 'torch', 'tornado', 'tortoise',
+    'tower', 'trail', 'traveler', 'trout', 'tsunami', 'tundra', 'tunnel', 'turquoise',
+    'turtle', 'twilight', 'typhoon', 'unicorn', 'valley', 'vapor', 'vertex', 'viper',
+    'vision', 'volcano', 'vortex', 'voyage', 'vulture', 'walrus', 'wanderer', 'warbler',
+    'warrior', 'wasp', 'watcher', 'waterfall', 'wave', 'weasel', 'whale', 'whirlwind',
+    'wildcat', 'willow', 'wind', 'wing', 'winter', 'wizard', 'wolf', 'wolverine',
+    'wombat', 'woodpecker', 'wren', 'wyvern', 'yak', 'zenith', 'zephyr', 'zebra'
+]
+
+# Use a system-level RNG for naming to avoid being affected by global random.seed()
+# This ensures sweep runs with fixed seeds don't repeat the same generated names.
+_SYS_RNG = random.SystemRandom()
+
+
+def random_name_gen(word_seperator: str = '-', prefix: Optional[str] = None, suffix: Optional[str] = None) -> str:
+    if suffix == 'sweep':
+        adjective = _SYS_RNG.choice(ADJECTIVE_LIST)
+        return adjective + word_seperator + suffix
+    
+    adjective = _SYS_RNG.choice(ADJECTIVE_LIST)
+    noun = _SYS_RNG.choice(NOUN_LIST)
+    name = adjective + word_seperator + noun
+    
+    if prefix:
+        name = prefix + word_seperator + name
+    if suffix:
+        name = name + word_seperator + suffix
+        
+    return name
+
+def random_adjective(n: int = 1) -> Union[str, List[str]]:
+    if n == 1:
+        return _SYS_RNG.choice(ADJECTIVE_LIST)
+    else:
+        return [_SYS_RNG.choice(ADJECTIVE_LIST) for _ in range(n)]
+    
+def random_noun(n: int = 1) -> Union[str, List[str]]:
+    if n == 1:
+        return _SYS_RNG.choice(NOUN_LIST)
+    else:
+        return [_SYS_RNG.choice(NOUN_LIST) for _ in range(n)]
