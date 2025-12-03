@@ -43,23 +43,26 @@ For background on the underlying control problem see the MPC documentation: http
 	 - Deterministic config capture via run config; model checkpoints (`model_last.pth`, `model_best.pth`).
 
 ---
-## Repository Layout (Essentials)
+## Repository Layout
 
 ```
 nnlibrary/
-	configs/          # Experiment & model/training hyper‑parameter configs
-	datasets/         # Dataset classes containing sample loading logic
-	engines/          # Main scripts orchestrating the runtime
-	models/           # Neural network architectures (MLP, TCN, etc.)
-	utils/            # Custom losses, schedulers, operations (causal conv, standardize, etc.)
+	configs/    # Experiment & model/training hyper‑parameter configs
+	datasets/   # Dataset classes containing sample loading logic
+	engines/    # Main scripts orchestrating the runtime
+	models/     # Neural network architectures (MLP, TCN, etc.)
+	utils/      # Custom losses, schedulers, operations (causal conv, standardize, etc.)
 
 scripts/
 	train.py                # Entry point: dynamic config loading & training
+	sweep.py                # Script for running WandB hyperparameter sweeps
 	eval_visualization.py   # Post‑training sequence prediction plots (WIP)
 
-exp/                # Auto‑generated experiment artifacts (checkpoints, figures, logs)
-data/               # Contains the dataset files
-environment.yml     # Conda environment definition
+exp/              # Auto‑generated experiment artifacts (checkpoints, figures, logs)
+data/             # !! Here you should put the datasets !!
+environment.yml   # Conda environment definition
+.secrets/
+	wandb         # !! File containing your WandB API key !!
 ```
 
 ---
@@ -71,7 +74,14 @@ conda env create -f environment.yml
 conda activate pytorch
 ```
 
-### 2. Data Layout Expectation (This is to be changed)
+### 1.1. WandB integration (Optional but strongly recommended)
+Add your WandB API key in a file called ```.secrets```:
+```bash
+mkdir .secrets
+echo '<wandb-api-key>' > .secrets/wandb
+```
+
+### 2. Data Layout Expectation (This might change at some point)
 ```
 data/
 	<dataset_range>/
@@ -146,9 +156,3 @@ trainer.train()      # trains, validates (if enabled), checkpoints
 * Evaluation symmetry: same evaluators for validation & test; consistent metric dict.
 * Traceability: run artifacts self-contained under `exp/`.
 * Modularization allows for easier debugging.
-
-
-## Next Steps / TODO (High-Level)
-* Add config template docs & typed validation
-* Optional rng seed control
-* CLI for quick metric table summary across runs
