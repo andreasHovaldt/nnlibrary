@@ -1,11 +1,10 @@
 import json
-import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 from nnlibrary.engines import hooks as h
 
 from .__default__ import *
-from .__base__ import DataLoaderConfig
+from .__base__ import BaseConfig, DataLoaderConfig
 
 
 
@@ -14,11 +13,11 @@ from .__base__ import DataLoaderConfig
 #############################################
 
 dataset_name = "730days_2023-09-24_2025-09-23"
-data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-regression-normalized"
+data_root = Path().cwd().resolve() / "data" / dataset_name / "dataset6-classification-normalized"
 dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text())
 
 save_path = "exp/"
-task = "regression"
+task = "classification"
 
 num_epochs = 10
 train_batch_size = 512
@@ -36,17 +35,12 @@ seed = 42
 #############################################
 ### Model Config ############################
 #############################################
-model_config = dict(
-    name = "TCNRegression",
+model_config = BaseConfig(
+    name = "HVACModeMLP",
     args = dict(
-        input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        sequence_length=dataset_metadata["temporal_settings"]["window"],
-        num_classes=dataset_metadata["dataset_info"]["num_classes"],
-        regression_head_hidden_dim=64,
-        hidden_layer_sizes=[64, 64, 128, 128],
-        kernel_size=3,
-        dropout=0.3,
-        dropout_type="channel",
+        window_size = dataset_metadata["temporal_settings"]["window"],
+        feature_dim = dataset_metadata["dataset_info"]["feature_dim"],
+        n_classes = dataset_metadata["dataset_info"]["num_classes"],
     )
 )
 
@@ -55,19 +49,29 @@ model_config = dict(
 #############################################
 ### Loss function Config ####################
 #############################################
-loss_fn = dict(
-    name="MSELoss",
-    args=dict()
+loss_fn = BaseConfig(
+    name="CrossEntropyLoss",
+    args=dict(
+        weight = [0.25, 0.50, 10.00],
+    )
 )
+
+# loss_fn = BaseConfig(
+#     name="FocalLoss",
+#     args=dict(
+#         alpha = [0.27, 0.46, 2.28],
+#         gamma = 2.0,
+#     )
+# )
 
 
 
 #############################################
 ### Optimizer Config ########################
 #############################################
-optimizer = dict( # 'params' and 'lr' should not be passed in args
+optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
     name = "AdamW",
-    args = dict(),
+    args = {},
 )
 
 
@@ -75,7 +79,7 @@ optimizer = dict( # 'params' and 'lr' should not be passed in args
 #############################################
 ### Scheduler Config ########################
 #############################################
-scheduler = dict( # 'optimizer' should not be passed in args
+scheduler = BaseConfig( # 'optimizer' should not be passed in args
     name = "OneCycleLR",
     args=dict(
         pct_start = 0.1, # % of time used for warmup
@@ -92,33 +96,14 @@ scheduler = dict( # 'optimizer' should not be passed in args
 #############################################
 dataset = SimpleNamespace()
 dataset.info = dict(
-    num_classes = 4,
+    num_classes = 3,
     class_names = [
-        "fan_speed_cmd_10001",
-        "fresh_air_damper_cmd_10001",
-        "setpoint_heating_mpc_10001",
-        "setpoint_cooling_mpc_10001",
+        "econ",
+        "cool",
+        "heat",
     ],
-    
     input_transforms = None,
-    
-    target_transforms = [
-        dict(
-            name = 'MinMaxNormalize',
-            args = dict(
-                min_vals=np.load(data_root / "stats" / "target_min.npy").astype(float).tolist(),
-                max_vals=np.load(data_root / "stats" / "target_max.npy").astype(float).tolist(),
-            ),
-        ),
-        
-        # dict(
-        #     name = 'Standardize',
-        #     args = dict(
-        #         mean=np.load(data_root / "stats" / "target_mean.npy").astype(float).tolist(),
-        #         std=np.load(data_root / "stats" / "target_std.npy").astype(float).tolist(),
-        #     ),
-        # ),
-    ]
+    target_transforms = None,
 )
 
 dataset.train = DataLoaderConfig(
@@ -157,11 +142,10 @@ dataset.test = DataLoaderConfig(
     shuffle=False,
 )
 
-
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "TCN-reg-sweep",
+    "name": "mlp-cls-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {

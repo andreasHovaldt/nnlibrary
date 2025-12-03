@@ -1,15 +1,9 @@
-import os
 import functools
-
 import numpy as np
-from pathlib import Path
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-
 import nnlibrary.utils.comm as comm
-
 
 
 class EvaluatorBase:
@@ -135,8 +129,8 @@ class ClassificationEvaluator(EvaluatorBase):
         if self.detailed and y_true.numel() > 0:
             result.update({
                 "confusion_matrix": self._confusion_matrix(y_true=y_true, y_pred=y_pred, class_names=self.class_names),
-                "y_true_seq": y_true,
-                "y_pred_seq": y_pred,
+                "y_true": y_true,
+                "y_pred": y_pred,
             })
 
         return result
@@ -193,7 +187,7 @@ class ClassificationEvaluator(EvaluatorBase):
         return fig, ax
 
 
-
+from typing import Callable, Optional
 
 class RegressionEvaluator(EvaluatorBase):
     def __init__(
@@ -205,6 +199,7 @@ class RegressionEvaluator(EvaluatorBase):
         amp_dtype: torch.dtype,
         output_names: list[str] | None = None,  # Names for each output dimension
         detailed: bool = False,
+        inverse_transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
         
     ) -> None:
         super().__init__()
@@ -216,6 +211,7 @@ class RegressionEvaluator(EvaluatorBase):
         self.amp_dtype = amp_dtype
         self.output_names = output_names
         self.detailed = detailed
+        self.inverse_transform = inverse_transform
         
     
     def run_evaluation(self, model: nn.Module):
@@ -263,6 +259,11 @@ class RegressionEvaluator(EvaluatorBase):
         # Concatenate metrics once
         y_true = torch.cat(y_true_list, dim=0) if y_true_list else torch.empty(0, dtype=torch.float32)
         y_pred = torch.cat(y_pred_list, dim=0) if y_pred_list else torch.empty(0, dtype=torch.float32)
+        
+        # # Inverse transform if provided - Removed again due to it making the aggregated metrics unfairly distributed, again features with higher values will affect MAE and RMSE more than others
+        # if self.inverse_transform is not None and y_true.numel() > 0:
+        #     y_true = self.inverse_transform(y_true)
+        #     y_pred = self.inverse_transform(y_pred)
 
         # Calculate metrics on original scale
         num_batches = max(len(self.dataloader), 1)
@@ -296,9 +297,9 @@ class RegressionEvaluator(EvaluatorBase):
         # If detailed, return raw sequences and create plots
         if self.detailed and len(y_true) > 0:
             result.update({
-                "y_true_seq": y_true,
-                "y_pred_seq": y_pred,
-                "prediction_plots": self._create_prediction_plots(y_true, y_pred),
+                "y_true": y_true,
+                "y_pred": y_pred,
+                "prediction_plots": self._create_prediction_plots(y_true, y_pred, draw_quantiles = False, draw_standard_deviation = True),
             })
         
         return result
@@ -335,7 +336,7 @@ class RegressionEvaluator(EvaluatorBase):
             return torch.tensor([torch.sqrt(torch.mean((y_true - y_pred) ** 2)).item()])
         return torch.sqrt(torch.mean((y_true - y_pred) ** 2, dim=0))
     
-    def _create_prediction_plots(self, y_true: torch.Tensor, y_pred: torch.Tensor):
+    def _create_prediction_plots(self, y_true: torch.Tensor, y_pred: torch.Tensor, draw_quantiles = False, draw_standard_deviation = False):
         """Create scatter plots comparing predictions vs ground truth"""
         import matplotlib.pyplot as plt
         
@@ -344,31 +345,76 @@ class RegressionEvaluator(EvaluatorBase):
             y_true = y_true.unsqueeze(1)
             y_pred = y_pred.unsqueeze(1)
         
+        # Inverse transform if provided
+        if self.inverse_transform is not None and y_true.numel() > 0:
+            y_true = self.inverse_transform(y_true)
+            y_pred = self.inverse_transform(y_pred)
+        
         num_outputs = y_true.shape[1]
         output_names = self.output_names if self.output_names else [f"Output {i}" for i in range(num_outputs)]
         
         # Create subplots for each output
-        fig, ax = plt.subplots(1, num_outputs, figsize=(6 * num_outputs, 5))
+        fig, axes = plt.subplots(1, num_outputs, figsize=(6 * num_outputs, 5))
         if num_outputs == 1:
-            ax = [ax]
+            axes = [axes]
         
-        for i, (ax, name) in enumerate(zip(ax, output_names)):
+        for i, (ax_i, name) in enumerate(zip(axes, output_names)):
             y_true_i = y_true[:, i].numpy()
             y_pred_i = y_pred[:, i].numpy()
             
             # Scatter plot
-            ax.scatter(y_true_i, y_pred_i, alpha=0.5, s=10)
+            ax_i.scatter(y_true_i, y_pred_i, alpha=0.5, s=10)
             
             # Perfect prediction line
             min_val = min(y_true_i.min(), y_pred_i.min())
             max_val = max(y_true_i.max(), y_pred_i.max())
-            ax.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction')
+            ax_i.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect prediction')
+
+            # Symmetric error-quantile bands around y = x
+            # Compute absolute residual quantiles so that:
+            #  - 25% of points lie within ±q25
+            #  - 50% of points lie within ±q50
+            #  - 75% of points lie within ±q75
+            if draw_quantiles:
+                abs_err = np.abs(y_pred_i - y_true_i)
+                q25, q50, q75 = np.quantile(abs_err, [0.25, 0.50, 0.75])
+
+                # Helper to draw a band defined by offset q around y=x
+                def draw_band(q: float, color: str, label: str | None = None, lw: float = 1.5):
+                    # Upper: y = x + q, Lower: y = x - q
+                    ax_i.plot([min_val, max_val], [min_val + q, max_val + q], color=color, linestyle='-', linewidth=lw, alpha=0.85, label=label)
+                    ax_i.plot([min_val, max_val], [min_val - q, max_val - q], color=color, linestyle='-', linewidth=lw, alpha=0.85)
+
+                # Draw from inner to outer so outer lines don't hide inner ones
+                # Colors: inner=green, mid=orange, outer=purple (distinct from red perfect line)
+                draw_band(q25, color='#27ae60', label='±q25 (25%)')
+                draw_band(q50, color='#f39c12', label='±q50 (50%)')
+                draw_band(q75, color='#8e44ad', label='±q75 (75%)')
+            elif draw_standard_deviation:
+                # Draw standard deviation bands based on residuals r = y_pred - y_true
+                residuals = y_pred_i - y_true_i
+                std = residuals.std()
+
+                if std > 0:
+                    def draw_sigma(k: float, color: str, label: str | None = None, lw: float = 1.5):
+                        off = k * std
+                        # Upper: y = x + k*std, Lower: y = x - k*std
+                        ax_i.plot([min_val, max_val], [min_val + off, max_val + off], color=color, linestyle='-', linewidth=lw, alpha=0.85, label=label)
+                        ax_i.plot([min_val, max_val], [min_val - off, max_val - off], color=color, linestyle='-', linewidth=lw, alpha=0.85)
+
+                    # Use distinct colors; annotate approximate Gaussian coverage for intuition
+                    draw_sigma(1.0, color='#3498db', label='±1σ (~68%)')
+                    draw_sigma(2.0, color='#e67e22', label='±2σ (~95%)')
+                    draw_sigma(3.0, color='#c0392b', label='±3σ (~99.7%)')
+                else:
+                    # If std is zero, all points are on the line; no bands to draw
+                    pass
             
-            ax.set_xlabel(f'True {name}')
-            ax.set_ylabel(f'Predicted {name}')
-            ax.set_title(f'{name}: Predictions vs Ground Truth')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
+            ax_i.set_xlabel(f'True {name}')
+            ax_i.set_ylabel(f'Predicted {name}')
+            ax_i.set_title(f'{name}: Predictions vs Ground Truth')
+            ax_i.legend()
+            ax_i.grid(True, alpha=0.3)
         
         fig.tight_layout()
-        return fig, ax
+        return fig, axes

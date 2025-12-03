@@ -1,21 +1,23 @@
 import os
 import time
+import wandb
+import torch
 import shutil
+import numpy as np
 import datetime as dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
-import wandb
-import torch
-from nnlibrary.engines.eval import ClassificationEvaluator, RegressionEvaluator
-import nnlibrary.utils.comm as comm
 
-if TYPE_CHECKING:
-    from .train import TrainerBase, Trainer
+import nnlibrary.utils.comm as comm
+from nnlibrary.engines.eval import ClassificationEvaluator, RegressionEvaluator
+from nnlibrary.utils.transforms import TransformBase
 
 
 class Hookbase:
     """
-    Base class for hooks that can be registered with :class:`TrainerBase`.
+    Base class for hooks.
+    
+    NOTE: self.trainer cannot be accessed duing hook __init__
     
     To avoid circular reference, hooks and trainer cannot own each other.
     This normally does not matter, but will cause memory leak if the
@@ -140,6 +142,9 @@ class WandbHook(Hookbase):
                                 }
                             )
                         
+                        elif key in ('y_true', 'y_pred'):
+                            continue
+                        
                         # Dump the remaining test metrics
                         else:
                             try:
@@ -204,7 +209,7 @@ class ValidationHook(Hookbase):
         if self.trainer and self.trainer.cfg.validate_model:
             
             if self.validator is None:
-                validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val)
+                validation_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.val, self.trainer.cfg.eval_batch_size)
                 
                 if self.trainer.cfg.task == "classification":
                     self.validator = ClassificationEvaluator(
@@ -217,6 +222,13 @@ class ValidationHook(Hookbase):
                         detailed=self.trainer.cfg.validation_plot,
                     )
                 elif self.trainer.cfg.task == "regression":
+                    
+                    # Provide inverse-transform for calculating on original value ranges if available
+                    inv_transform = None
+                    transform: Optional[TransformBase] = getattr(self.trainer, 'target_transform', None)
+                    if transform is not None and hasattr(transform, 'inverse_transform'):
+                        inv_transform = transform.inverse_transform
+                    
                     self.validator = RegressionEvaluator(
                         dataloader=validation_loader,
                         loss_fn=self.trainer.loss_fn,
@@ -225,6 +237,7 @@ class ValidationHook(Hookbase):
                         amp_dtype=self.trainer.amp_dtype,
                         output_names=self.trainer.cfg.dataset.info["class_names"],
                         detailed=self.trainer.cfg.validation_plot,
+                        inverse_transform=inv_transform,
                     )
                 else: 
                     raise ValueError(f"Unknown task '{self.trainer.cfg.task}' for ValidationHook")
@@ -287,7 +300,7 @@ class TestHook(Hookbase):
         if self.trainer and self.trainer.cfg.test_model:
             
             if self.tester is None:
-                test_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.test)
+                test_loader = self.trainer.build_dataloader(self.trainer.cfg.dataset.test, self.trainer.cfg.eval_batch_size)
                 
                 if self.trainer.cfg.task == "classification":
                     self.tester = ClassificationEvaluator(
@@ -300,6 +313,13 @@ class TestHook(Hookbase):
                         detailed=True,
                     )
                 elif self.trainer.cfg.task == "regression":
+                    
+                    # Provide inverse-transform for calculating on original value ranges if available
+                    inv_transform = None
+                    transform: Optional[TransformBase] = getattr(self.trainer, 'target_transform', None)
+                    if transform is not None and hasattr(transform, 'inverse_transform'):
+                        inv_transform = transform.inverse_transform
+                    
                     self.tester = RegressionEvaluator(
                         dataloader=test_loader,
                         loss_fn=self.trainer.loss_fn,
@@ -308,6 +328,7 @@ class TestHook(Hookbase):
                         amp_dtype=self.trainer.amp_dtype,
                         output_names=self.trainer.cfg.dataset.info["class_names"],
                         detailed=True,
+                        inverse_transform=inv_transform,
                     )
                 else:
                     raise ValueError(f"Unknown task '{self.trainer.cfg.task}' for TestHook")
@@ -327,7 +348,7 @@ class TestHook(Hookbase):
             
             print(f"Final test result:")
             for key, value in result.items():
-                if key in ("confusion_matrix", "prediction_plots", "y_true_seq", "y_pred_seq"):
+                if key in ("confusion_matrix", "prediction_plots", "y_true", "y_pred"):
                     continue
                 try:
                     print(f"   {key}: {float(value):.4f}")
@@ -358,7 +379,8 @@ class TestHook(Hookbase):
 
 class CheckpointerHook(Hookbase):
     def __init__(self) -> None:
-        self.best_metric_value: float = 0.0
+        self.best_metric_value_high: float = 0.0
+        self.best_metric_value_low: float = np.inf
         
     def after_epoch(self):
         if self.trainer is not None and comm.is_main_process():
@@ -377,21 +399,35 @@ class CheckpointerHook(Hookbase):
                 save_dir / "model_last.pth.tmp"
             )
             os.replace(save_dir / "model_last.pth.tmp", save_dir / "model_last.pth")
-            
+            self.trainer.logger.debug(f"Saved latest model to: '{save_dir / "model_last.pth"}'")
             
             # Save a copy as best if validation improved
             if self.trainer.cfg.validate_model:
                 metric_val = None
                 val_result = self.trainer.info.get("validation_result")
+                
                 if isinstance(val_result, dict):
                     metric_val = val_result.get(self.trainer.cfg.validation_metric_name)
-                if metric_val is not None and metric_val > self.best_metric_value:
+                
+                if self.trainer.cfg.validation_metric_higher_is_better:
                     # Copy the last model if it was the best
-                    shutil.copyfile(
-                        save_dir / "model_last.pth",
-                        save_dir / "model_best.pth",
-                    )
-                    self.best_metric_value = metric_val
+                    if metric_val is not None and metric_val > self.best_metric_value_high:
+                        print(f"New best model! Previous best metric value: {self.best_metric_value_high:.4f}. New best metric value: {metric_val:.4f}")
+                        shutil.copyfile(
+                            save_dir / "model_last.pth",
+                            save_dir / "model_best.pth",
+                        )
+                        self.trainer.logger.info(f"Saved new best model to: {save_dir / "model_best.pth"}")
+                        self.best_metric_value_high = metric_val
+                else:
+                    if metric_val is not None and metric_val < self.best_metric_value_low:
+                        print(f"New best model! Previous best metric value: {self.best_metric_value_low:.4f}. New best metric value: {metric_val:.4f}")
+                        shutil.copyfile(
+                            save_dir / "model_last.pth",
+                            save_dir / "model_best.pth",
+                        )
+                        self.trainer.logger.info(f"Saved new best model to: {save_dir / "model_best.pth"}")
+                        self.best_metric_value_low = metric_val
             
 
 class TimingHook(Hookbase):
@@ -514,7 +550,7 @@ class TimingHook(Hookbase):
             avg_step_ms = self._epoch_step_time_ms_total / steps
             steps_per_s = 1000.0 / avg_step_ms if avg_step_ms > 0 else 0.0
             samples_per_s = (self._epoch_samples_total / (epoch_ms / 1000.0)) if epoch_ms > 0 else 0.0
-            msg = f"[Timing] Epoch {epoch_num+1} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
+            msg = f"[Timing] Epoch {epoch_num+1}/{self.trainer.num_epochs} wall={epoch_ms:.1f}ms | avg_step={avg_step_ms:.1f}ms ({steps_per_s:.1f} steps/s, {samples_per_s:.1f} samples/s)"
             
             # Estimate remaining time:
             if self._t_train_start:
@@ -568,7 +604,7 @@ class SaveTrainingRun(Hookbase):
             cfg = self.trainer.cfg
             timestamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
             run_name = f"{cfg.model_config.name}_{timestamp}"
-            self.save_path = Path(cfg.save_path / run_name)
+            #self.save_path = Path(cfg.save_path / run_name) this already exists
             # TODO: save shiez
             
         raise NotImplementedError

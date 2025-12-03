@@ -12,7 +12,6 @@ class OneCycleLR(lr_scheduler.OneCycleLR):
         self,
         optimizer: optim.Optimizer,
         trainer: "Trainer | None" = None,
-        max_lr: float | list[float] = 0.001, 
         total_steps: int | None = None, 
         epochs: int | None = None, 
         steps_per_epoch: int | None = None, 
@@ -37,19 +36,22 @@ class OneCycleLR(lr_scheduler.OneCycleLR):
             except ReferenceError:
                 raise ReferenceError("The trainer proxy is dead and has probably been garbage collected!")
         
-        super().__init__(
-            optimizer=optimizer, 
-            max_lr=max_lr, 
-            total_steps=total_steps, 
-            epochs=epochs, 
-            steps_per_epoch=steps_per_epoch, 
-            pct_start=pct_start, 
-            anneal_strategy=anneal_strategy, 
-            cycle_momentum=cycle_momentum, 
-            base_momentum=base_momentum, 
-            max_momentum=max_momentum, 
-            div_factor=div_factor, 
-            final_div_factor=final_div_factor, 
-            three_phase=three_phase, 
-            last_epoch=last_epoch,
-        )
+        if trainer is not None:
+            super().__init__(
+                optimizer=optimizer, 
+                max_lr=trainer.cfg.lr, 
+                total_steps=total_steps, 
+                epochs=epochs, 
+                steps_per_epoch=steps_per_epoch, 
+                pct_start=pct_start, 
+                anneal_strategy=anneal_strategy, 
+                cycle_momentum=cycle_momentum, 
+                base_momentum=base_momentum, 
+                max_momentum=max_momentum, 
+                div_factor=div_factor, 
+                final_div_factor=final_div_factor, 
+                three_phase=three_phase, 
+                last_epoch=last_epoch,
+            )
+        else:
+            raise ReferenceError("The trainer proxy is dead and has probably been garbage collected!")

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, asdict
-from typing import Any
+from typing import Any, Optional
 
 
 
@@ -19,7 +19,13 @@ class BaseConfig:
 @dataclass
 class DataLoaderConfig:
     dataset: Any
-    batch_size: int
     shuffle: bool = False
-    num_workers: int | None = None
-    pin_memory: bool | None = None
+    num_workers: Optional[int] = None
+    pin_memory: Optional[bool] = None
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DataLoaderConfig':
+        return cls(**data)
+    
+    def to_dict(self) -> dict:
+        return asdict(self)
