@@ -9,8 +9,8 @@ For background on the underlying control problem see the MPC documentation: http
 
 1. Configuration‑First Design
 	 - Each experiment is defined by a config module in `nnlibrary/configs/` (model, data paths, dataloader params, optimizer/scheduler, hooks, metrics).
-	 - Usually each config imports a default config (`nnlibrary/configs/__default__.py`) which contains some of the lesser important config settings
-    	 - This approach is done because all configs must contain all the different arguments, but it is not always necessary to modify all settings per config basis
+	 - Usually each config imports a default config (`nnlibrary/configs/__default__.py`) which contains some of the lesser important config settings.
+	 - This approach is done because all configs must contain all the different arguments, but it is not always necessary to modify all settings per config basis.
 
 2. Datasets & I/O
 	 - Dataset configuration (paths, batch sizes, shuffle flags, optional transforms) is declared in the experiment config modules under `nnlibrary/configs/` (see the `dataset` and its `train/val/test` `DataLoaderConfig` entries).
@@ -18,13 +18,14 @@ For background on the underlying control problem see the MPC documentation: http
 	 - To use a different dataset, add a new Dataset class in `nnlibrary/datasets/`, import it in `nnlibrary/datasets/__init__.py`, and then you can reference it by name in the config’s dataset section.
 
 3. Models
-	 - Defined in `nnlibrary/models/` (e.g. `mlp.py`, `cnn.py`).
+	 - Defined in `nnlibrary/models/` (e.g. `mlp.py`, `cnn.py`, `transformer.py`).
+	 - Available architectures: MLP (`HVACModeMLP`), TCN (`TCN`, `TCNRegression`), Transformer (`TransformerRegression`, `TransformerRegressionOptimized`, `TransformerClassificationOptimized`).
 	 - New models can be defined, but must be imported in `nnlibrary/models/__init__.py` to be used.
 
 4. Training Engine
-	 - Central `Trainer` (in `nnlibrary/engines/train.py`) orchestrates: dataloaders, model, optimizer / scheduler, AMP autocast, hooks.
-	 - Usually direct usage of `Trainer` is not recommended, instead use the training script under `scripts/train.py`
-     - Metrics & state exposed through a shared `info` dict so hooks remain decoupled.
+	 - Central `Trainer` (in `nnlibrary/engines/train.py`) orchestrates: dataloaders, model, optimizer / scheduler, AMP autocast (with `GradScaler` for float16), gradient clipping, hooks.
+	 - Usually direct usage of `Trainer` is not recommended, instead use the training script under `scripts/train.py`.
+	 - Metrics & state exposed through a shared `info` dict so hooks remain decoupled.
 
 5. Hooks (Lifecycle Extensions)
 	 - A 'Hook' frame is present for interacting with multiple different stages of the training process, these can be seen under `nnlibrary/engines/hooks.py`.
@@ -49,17 +50,19 @@ For background on the underlying control problem see the MPC documentation: http
 nnlibrary/
 	configs/    # Experiment & model/training hyper‑parameter configs
 	datasets/   # Dataset classes containing sample loading logic
-	engines/    # Main scripts orchestrating the runtime
-	models/     # Neural network architectures (MLP, TCN, etc.)
-	utils/      # Custom losses, schedulers, operations (causal conv, standardize, etc.)
+	engines/    # Training engine, hooks, and evaluation classes
+	models/     # Neural network architectures (MLP, TCN, Transformer)
+	utils/      # Custom losses, schedulers, transforms, misc
 
 scripts/
 	train.py                # Entry point: dynamic config loading & training
 	sweep.py                # Script for running WandB hyperparameter sweeps
-	eval_visualization.py   # Post‑training sequence prediction plots (WIP)
+	eval_visualization.py   # Post‑training evaluation and visualization
+	export_onnx_model.py    # Export trained model checkpoints to ONNX format
 
 exp/              # Auto‑generated experiment artifacts (checkpoints, figures, logs)
 data/             # !! Here you should put the datasets !!
+dumpster/         # Scratch/experimental scripts (not part of main workflow)
 environment.yml   # Conda environment definition
 .secrets/
 	wandb         # !! File containing your WandB API key !!
@@ -75,7 +78,7 @@ conda activate pytorch
 ```
 
 ### 1.1. WandB integration (Optional but strongly recommended)
-Add your WandB API key in a file called ```.secrets```:
+Add your WandB API key in a file under the ```.secrets``` directory:
 ```bash
 mkdir .secrets
 echo '<wandb-api-key>' > .secrets/wandb
@@ -93,18 +96,22 @@ data/
 ```
 
 ### 3. Train a Model
-Use an existing config name (e.g. `HVACModeMLP`, `TCN-reg`, etc.). The train script resolves short names, dotted paths, or file paths.
+Use an existing config name (e.g. `hvac-mlp-cls`, `TCN-reg`, `transformer-reg`, etc.). The train script resolves short names, dotted paths, or file paths.
 
 For running the config named "TCN-reg", residing at `nnlibrary/configs/TCN-reg.py`:
 ```bash
-python scripts/train.py TCN-reg # Shorthand
-python scripts/train.py nnlibrary.configs.TCN-reg # Using module path
-python scripts/train.py nnlibrary/configs/TCN-reg.py # Using relative or absolute path
+python scripts/train.py -n TCN-reg # Shorthand
+python scripts/train.py -n nnlibrary.configs.TCN-reg # Using module path
+python scripts/train.py -n nnlibrary/configs/TCN-reg.py # Using relative or absolute path
 ```
+
+Optional flags:
+- `--logging` — Enable logger output
+- `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` — Set logging verbosity (default: INFO)
 
 Outputs (example):
 ```
-exp/<dataset>/<model_name>/
+exp/<dataset>/<model_name>/<run_name>/
 	model/
         model_last.pth
 	    model_best.pth
@@ -113,21 +120,72 @@ exp/<dataset>/<model_name>/
 	wandb/
 ```
 
-### 4. Evaluate & Visualize (Very WIP, only works for classification task)
-```
-Usage:
-    python scripts/eval_visualization.py <config_name> [--split test|val] [--interactive]
-```
-```
-python scripts/eval_visualization.py \
-	TCN-reg \
-    --split {val, test}     # Which split to evaluate on
-	--interactive           # optional Plotly HTML timeline
+### 3.1. Hyperparameter Sweeps (Optional)
+The framework supports WandB-powered hyperparameter sweeps. To use sweeps:
+
+1. **Define a sweep configuration in your config file:**
+```python
+# At the end of your config (e.g., TCN-reg.py)
+sweep_configuration = {
+    "name": "TCN-reg-sweep",
+    "method": "grid",  # or "random", "bayes"
+    "metric": {"goal": "minimize", "name": "loss"},
+    "parameters": {
+        "num_epochs": {"values": [5, 10, 15, 20, 30]},
+        "lr": {"values": [1e-2, 1e-3, 1e-4]},
+        "train_batch_size": {"values": [256, 512, 1024, 2048]},
+    },
+}
 ```
 
+2. **Run the sweep:**
+```bash
+python scripts/sweep.py -n TCN-reg
+python scripts/sweep.py -n transformer-reg --logging --log-level DEBUG
+```
 
-### 5. Inspect Metrics
-* TensorBoard: `tensorboard --logdir exp/<dataset>/<model_name>/tensorboard`
+**Requirements:**
+- WandB must be enabled in the config (`enable_wandb = True`)
+- A `sweep_configuration` dict must be defined in the config
+- Setting a `seed` is recommended for reproducibility across sweep runs
+
+**Notes:**
+- Sweep results are saved under `exp/<dataset>/<model>/sweeps/<sweep_name>/`
+- The sweep will override config values (e.g., `lr`, `num_epochs`) with values from the sweep search space
+- Metrics logged depend on the task: regression logs `loss`, `mae`, `rmse`, `r2_score`; classification logs `loss`, `avg_sample_accuracy`, `avg_class_accuracy`
+
+
+
+### 4. Evaluate & Visualize
+Visualize predictions from a trained model checkpoint:
+```bash
+python scripts/eval_visualization.py -n <config_name> -r <run_name> [--split train|val|test] [--interactive]
+```
+
+Example:
+```bash
+python scripts/eval_visualization.py -n TCN-reg -r witty-salamander-4 --split test
+python scripts/eval_visualization.py -n transformer-reg -r clever-fox-2 --interactive
+```
+
+### 5. Export to ONNX
+Export a trained checkpoint to ONNX format for deployment:
+```bash
+python scripts/export_onnx_model.py -n <config_name> -r <run_name> [--dynamic-batch] [--dynamic-seq] [--opset <VERSION_NUM>]
+```
+
+The exported ONNX model is saved under: `exp/<dataset>/<model_name>/<run_name>/onnx/`
+
+Example:
+```bash
+python scripts/export_onnx_model.py -n TCN-reg -r witty-salamander-4
+python scripts/export_onnx_model.py -n transformer-reg -r clever-fox-2 --dynamic-batch --opset 17
+python scripts/export_onnx_model.py -n transformer-cls -r ugly-fork-42 --dynamic-batch --dynamic-seq
+```
+It is recommended to set the `--dynamic-batch` flag, since in deployment, the batch size would usually differ from the batch sized when trained. The `--dynamic-seq` should only be used if you know that the architecture supports a dynamic sequence length.
+
+### 6. Inspect Metrics
+* TensorBoard: `tensorboard --logdir exp/<dataset>/<model_name>/<run_name>/tensorboard`
 * Weights & Biases: open the run page (if enabled in config).
 
 ---
@@ -136,8 +194,9 @@ python scripts/eval_visualization.py \
 |------|-------|
 | New model | Implement in `nnlibrary/models/`, import new model in `/nnlibrary/model/__init__.py`, then reference in your config |
 | Custom hook | Subclass `Hookbase` in `nnlibrary/engines/hooks.py`, add to config `hooks` list |
-| New loss or scheduler | Add to `nnlibrary/utils/loss.py` or `utils/schedulers.py` |
-| New dataset | Implement in `nnlibrary/datasets/`, import new dataset in `/nnlibrary/datasets/__init__.py`, then update config to point to it |s
+| New loss or scheduler | Add to `nnlibrary/utils/loss.py` or `nnlibrary/utils/schedulers.py` |
+| New transform | Add to `nnlibrary/utils/transforms.py` (e.g. target normalization/standardization) |
+| New dataset | Implement in `nnlibrary/datasets/`, import in `nnlibrary/datasets/__init__.py`, then reference in config |
 
 
 ## Minimal In‑Code Example
