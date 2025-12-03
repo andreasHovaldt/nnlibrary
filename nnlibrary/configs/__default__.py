@@ -20,6 +20,7 @@ lr = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 amp_enable = True
 amp_dtype = "float16"
+clip_grad = None # Gradient clipping, None to disable, set to a float to enable, common range between 0.5 -> 5.0
 
 enable_tensorboard = True
 enable_wandb = True
@@ -36,6 +37,10 @@ hooks = [
     h.TimingHook,
 ]
 
-# TODO CONFIGS
-# seed = None
-# weight = None
+# Reproducibility controls
+# If set to an integer, training will attempt to be deterministic across Python, NumPy, and PyTorch
+# Note: some CUDA ops are inherently non-deterministic; enabling full determinism may impact performance
+seed = None
+
+# TODO: CONFIGS
+# weight = None # should be a path to a pretrained params dict
