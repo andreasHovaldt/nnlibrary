@@ -36,7 +36,7 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TransformerClassificationOptimized",
+    name = "TransformerClassification",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
         num_classes=dataset_metadata["dataset_info"]["num_classes"],

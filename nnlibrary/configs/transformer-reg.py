@@ -37,7 +37,7 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TransformerRegressionOptimized",
+    name = "TransformerRegression",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
         output_dim=dataset_metadata["dataset_info"]["num_classes"],

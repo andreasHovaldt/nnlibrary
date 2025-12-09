@@ -23,8 +23,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Imports
 import torch
 import onnx
-from nnlibrary.models.mlp import SimpleMultiTaskModel, SimpleClassificationModel, HVACModeMLP
-from nnlibrary.models.cnn import TCN, TCNRegression, TCNResidualBlock
+from nnlibrary.models.mlp import SimpleMultiTaskModel, SimpleClassificationModel, HVACMLP
+from nnlibrary.models.cnn import TCNClassification, TCNRegression, TCNResidualBlock
 
 
 # Convert model to ONNX format

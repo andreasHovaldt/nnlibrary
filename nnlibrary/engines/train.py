@@ -25,7 +25,7 @@ import nnlibrary.utils.transforms as transforms
 
 from .hooks import Hookbase
 
-from nnlibrary.configs import BaseConfig, DataLoaderConfig
+from nnlibrary.configs.__base__ import BaseConfig, DataLoaderConfig
 from nnlibrary.utils.misc import REPO_ROOT, AMP_DTYPES, random_name_gen
 
 

@@ -38,7 +38,7 @@ class SimpleClassificationModel(nn.Module):
         return self.softmax(self.classification_head(x))
 
     
-class HVACModeMLP(nn.Module):
+class HVACMLP(nn.Module):
     def __init__(self, window_size: int, feature_dim: int, n_classes: int):
         super().__init__()
         self.window_size = window_size

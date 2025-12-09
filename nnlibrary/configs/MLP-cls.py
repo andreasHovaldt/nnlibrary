@@ -36,15 +36,11 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TCNClassification",
+    name = "HVACMLP",
     args = dict(
-        input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        sequence_length=dataset_metadata["temporal_settings"]["window"],
-        num_classes=dataset_metadata["dataset_info"]["num_classes"],
-        hidden_layer_sizes=[64, 64, 128, 128],
-        kernel_size=3,
-        dropout=0.3,
-        dropout_type="channel",
+        window_size = dataset_metadata["temporal_settings"]["window"],
+        feature_dim = dataset_metadata["dataset_info"]["feature_dim"],
+        n_classes = dataset_metadata["dataset_info"]["num_classes"],
     )
 )
 
@@ -60,7 +56,7 @@ loss_fn = dict(
     )
 )
 
-# loss_fn = BaseConfig(
+# loss_fn = dict(
 #     name="FocalLoss",
 #     args=dict(
 #         alpha = [0.27, 0.46, 2.28],
@@ -146,11 +142,10 @@ dataset.test = DataLoaderConfig(
     shuffle=False,
 )
 
-
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "TCN-cls-sweep",
+    "name": "MLP-cls-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {

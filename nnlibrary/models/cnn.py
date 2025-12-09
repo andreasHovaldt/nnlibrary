@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import warnings
 
 
-class TCN(nn.Module):
+class TCNClassification(nn.Module):
     """
     Temporal Convolutional Network
 
@@ -107,7 +107,7 @@ class TCN(nn.Module):
         return logits
         
         
-class TCNRegression(TCN):
+class TCNRegression(TCNClassification):
     def __init__(
         self, 
         input_dim: int, 
