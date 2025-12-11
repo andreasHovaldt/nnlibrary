@@ -4,11 +4,11 @@ from typing import Optional
 try:
     # Local imports (avoid circulars by importing within functions if needed)
     from nnlibrary.models.transformer import TransformerRegression, EncoderLayer as EncoderLayerBasic
-    from nnlibrary.models.transformer2 import TransformerRegressionOptimized, EncoderLayerOptimized as EncoderLayerOpt
+    from nnlibrary.models.transformer import TransformerRegression, EncoderLayer as EncoderLayerOpt
 except Exception:
     # Types will be resolved at runtime when functions are called
     TransformerRegression = object  # type: ignore
-    TransformerRegressionOptimized = object  # type: ignore
+    TransformerRegression = object  # type: ignore
 
 
 def _copy_linear(dst: torch.nn.Linear, src: torch.nn.Linear) -> None:

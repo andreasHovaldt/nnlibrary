@@ -8,7 +8,7 @@ import torch
 from torch.amp.grad_scaler import GradScaler
 import numpy as np
 from typing import TypedDict, Literal
-from nnlibrary.models import TransformerRegression, TransformerRegressionOptimized
+from nnlibrary.models import TransformerRegression, TransformerRegression
 
 def set_seed(seed=42):
     """Set seed for reproducibility"""
@@ -83,12 +83,12 @@ except RuntimeError:
     
 # Optimized implementation
 try: 
-    model_opt = TransformerRegressionOptimized(**transformer_hyperparameters)
+    model_opt = TransformerRegression(**transformer_hyperparameters)
     if TORCH_COMPILE: 
-        model_opt: TransformerRegressionOptimized = torch.compile(model_opt)  # type: ignore
+        model_opt: TransformerRegression = torch.compile(model_opt)  # type: ignore
 except RuntimeError:
     print('Failed to compile model!')
-    model_opt = TransformerRegressionOptimized(**transformer_hyperparameters)
+    model_opt = TransformerRegression(**transformer_hyperparameters)
 
 # Benchmark
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

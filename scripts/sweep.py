@@ -17,6 +17,10 @@ parser.add_argument("-n", "--config-name", type=str, required=True, help="Name o
 parser.add_argument("--logging", action="store_true", help="Whether to display logger prints.")
 parser.add_argument('--log-level', default='INFO', choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'], help="The logging level used if logging is enabled. Default: INFO")
 
+# Add project root to Python path
+project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(project_root))
+
 # Dont know why but I could import the function from train.py >:(
 def load_cfg(name: str):
     """Load a config module by short name, dotted path, or file path.
@@ -46,6 +50,9 @@ def load_cfg(name: str):
         spec = importlib.util.spec_from_file_location(cfg_path.stem, cfg_path)
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
+            # Enable relative imports by setting the package if the file is in nnlibrary/configs
+            if "nnlibrary" in cfg_path.parts and "configs" in cfg_path.parts:
+                 module.__package__ = "nnlibrary.configs"
             spec.loader.exec_module(module)  # type: ignore[attr-defined]
             return module
     # If all else fails, list available configs
@@ -133,9 +140,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if not set_wandb_env_var(api_file=None): exit()
     
-    # Add repo root to path
-    project_root = Path(__file__).parent.parent.resolve()
-    sys.path.insert(0, str(project_root))
     from nnlibrary.engines import Trainer
     from nnlibrary.utils.misc import random_name_gen, REPO_ROOT
     from nnlibrary.configs.__base__ import BaseConfig

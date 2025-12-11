@@ -19,9 +19,9 @@ dataset_metadata = json.loads((data_root / "stats" / "metadata.json").read_text(
 save_path = "exp/"
 task = "classification"
 
-num_epochs = 20
-train_batch_size = 1024
-eval_batch_size = 1024
+num_epochs = 10
+train_batch_size = 512
+eval_batch_size = 512
 
 lr = 1e-3
 
@@ -36,19 +36,15 @@ seed = 42
 ### Model Config ############################
 #############################################
 model_config = dict(
-    name = "TransformerClassification",
+    name = "HVACMLP",
     args = dict(
-        input_dim=dataset_metadata["dataset_info"]["feature_dim"],
-        num_classes=dataset_metadata["dataset_info"]["num_classes"],
-        dim_model = 64,
-        num_heads = 4,
-        num_layers = 3,
-        dim_ff = 256,
-        max_seq_length=dataset_metadata["temporal_settings"]["window"],
-        dropout=0.1,
-        pooling="cls",
+        window_size = dataset_metadata["temporal_settings"]["window"],
+        feature_dim = dataset_metadata["dataset_info"]["feature_dim"],
+        n_classes = dataset_metadata["dataset_info"]["num_classes"],
     )
 )
+
+
 
 #############################################
 ### Loss function Config ####################
@@ -60,6 +56,14 @@ loss_fn = dict(
     )
 )
 
+# loss_fn = dict(
+#     name="FocalLoss",
+#     args=dict(
+#         alpha = [0.27, 0.46, 2.28],
+#         gamma = 2.0,
+#     )
+# )
+
 
 
 #############################################
@@ -67,7 +71,7 @@ loss_fn = dict(
 #############################################
 optimizer = dict( # 'params' and 'lr' should not be passed in args
     name = "AdamW",
-    args = dict(),
+    args = {},
 )
 
 
@@ -138,11 +142,10 @@ dataset.test = DataLoaderConfig(
     shuffle=False,
 )
 
-
 # Sweep configuration - This is only needed if you want to run 'scripts/sweep.py'
 # Define the search space
 sweep_configuration = {
-    "name": "transformer-cls-sweep",
+    "name": "MLP-cls-sweep",
     "method": "grid",
     "metric": {"goal": "minimize", "name": "loss"},
     "parameters": {

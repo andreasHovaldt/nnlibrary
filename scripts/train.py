@@ -60,6 +60,9 @@ if __name__ == "__main__":
             spec = importlib.util.spec_from_file_location(cfg_path.stem, cfg_path)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
+                # Enable relative imports by setting the package if the file is in nnlibrary/configs
+                if "nnlibrary" in cfg_path.parts and "configs" in cfg_path.parts:
+                     module.__package__ = "nnlibrary.configs"
                 spec.loader.exec_module(module)  # type: ignore[attr-defined]
                 return module
         # If all else fails, list available configs

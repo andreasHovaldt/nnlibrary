@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from nnlibrary.engines import hooks as h
 
 from .__default__ import *
-from .__base__ import BaseConfig, DataLoaderConfig
+from .__base__ import DataLoaderConfig
 
 
 
@@ -35,8 +35,8 @@ seed = 42
 #############################################
 ### Model Config ############################
 #############################################
-model_config = BaseConfig(
-    name = "TCN",
+model_config = dict(
+    name = "TCNClassification",
     args = dict(
         input_dim=dataset_metadata["dataset_info"]["feature_dim"],
         sequence_length=dataset_metadata["temporal_settings"]["window"],
@@ -53,7 +53,7 @@ model_config = BaseConfig(
 #############################################
 ### Loss function Config ####################
 #############################################
-loss_fn = BaseConfig(
+loss_fn = dict(
     name="CrossEntropyLoss",
     args=dict(
         weight = [0.25, 0.50, 10.00],
@@ -73,7 +73,7 @@ loss_fn = BaseConfig(
 #############################################
 ### Optimizer Config ########################
 #############################################
-optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
+optimizer = dict( # 'params' and 'lr' should not be passed in args
     name = "AdamW",
     args = {},
 )
@@ -83,7 +83,7 @@ optimizer = BaseConfig( # 'params' and 'lr' should not be passed in args
 #############################################
 ### Scheduler Config ########################
 #############################################
-scheduler = BaseConfig( # 'optimizer' should not be passed in args
+scheduler = dict( # 'optimizer' should not be passed in args
     name = "OneCycleLR",
     args=dict(
         pct_start = 0.1, # % of time used for warmup
