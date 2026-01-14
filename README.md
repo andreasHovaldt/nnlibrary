@@ -9,26 +9,26 @@ For background on the underlying control problem see the MPC documentation: http
 
 1. Configuration‑First Design
 	 - Each experiment is defined by a config module in `nnlibrary/configs/` (model, data paths, dataloader params, optimizer/scheduler, hooks, metrics).
-	 - Usually each config imports a default config (`nnlibrary/configs/__default__.py`) which contains some of the lesser important config settings.
+	 - Usually each config imports a default base config ([`nnlibrary/configs/__default__.py`](./nnlibrary/configs/__default__.py)) which contains some of the lesser important config settings.
 	 - This approach is done because all configs must contain all the different arguments, but it is not always necessary to modify all settings per config basis.
 
 2. Datasets & I/O
 	 - Dataset configuration (paths, batch sizes, shuffle flags, optional transforms) is declared in the experiment config modules under `nnlibrary/configs/` (see the `dataset` and its `train/val/test` `DataLoaderConfig` entries).
-	 - Concrete dataset classes live in `nnlibrary/datasets/` (e.g. `MpcDatasetHDF5` from `nnlibrary/datasets/mpc_ahu.py`). Each dataset should at the least implements `__len__` and `__getitem__` to return `(inputs, targets)`.
-	 - To use a different dataset, add a new Dataset class in `nnlibrary/datasets/`, import it in `nnlibrary/datasets/__init__.py`, and then you can reference it by name in the config’s dataset section.
+	 - Concrete dataset classes are placed in `nnlibrary/datasets/` (e.g. `MpcDatasetHDF5` from [`nnlibrary/datasets/mpc_ahu.py`](./nnlibrary/datasets/mpc_ahu.py)). Each dataset should at the least implements `__len__` and `__getitem__` to return `(inputs, targets)`.
+	 - To use a different dataset, add a new Dataset class in `nnlibrary/datasets/`, import it in [`nnlibrary/datasets/__init__.py`](./nnlibrary/datasets/__init__.py), and then you can reference it by name in the config’s dataset section.
 
 3. Models
 	 - Defined in `nnlibrary/models/` (e.g. `mlp.py`, `cnn.py`, `transformer.py`).
-	 - Available architectures: MLP (`HVACModeMLP`), TCN (`TCN`, `TCNRegression`), Transformer (`TransformerRegression`, `TransformerRegressionOptimized`, `TransformerClassificationOptimized`).
-	 - New models can be defined, but must be imported in `nnlibrary/models/__init__.py` to be used.
+	 - Available architectures: MLP (`HVACMLP`), TCN (`TCNClassification`, `TCNRegression`), Transformer (`TransformerRegression`, `TransformerClassification`).
+	 - New models can also be defined, but must be imported in [`nnlibrary/models/__init__.py`](./nnlibrary/__init__.py) to be used.
 
 4. Training Engine
-	 - Central `Trainer` (in `nnlibrary/engines/train.py`) orchestrates: dataloaders, model, optimizer / scheduler, AMP autocast (with `GradScaler` for float16), gradient clipping, hooks.
-	 - Usually direct usage of `Trainer` is not recommended, instead use the training script under `scripts/train.py`.
+	 - Central `Trainer` (in [`nnlibrary/engines/train.py`](./nnlibrary/engines/train.py)) orchestrates: dataloaders, model, optimizer / scheduler, AMP autocast (with `GradScaler` for float16), gradient clipping, hooks.
+	 - Usually direct usage of `Trainer` is not recommended, instead use the training script under [`scripts/train.py`](./scripts/train.py).
 	 - Metrics & state exposed through a shared `info` dict so hooks remain decoupled.
 
 5. Hooks (Lifecycle Extensions)
-	 - A 'Hook' frame is present for interacting with multiple different stages of the training process, these can be seen under `nnlibrary/engines/hooks.py`.
+	 - A 'Hook' frame is present for interacting with multiple different stages of the training process, these can be seen under [`nnlibrary/engines/hooks.py`](./nnlibrary/engines/hooks.py).
      - The base hooks implement validation / test evaluation, checkpointing, timing instrumentation, logging to Weights & Biases (W&B) and TensorBoard, post‑test plotting.
 	 - Easy to add custom logic (inherit `Hookbase` and register in config list).
     	 - If you want to keep the default hooks in your custom config add the following to your config:
@@ -96,9 +96,9 @@ data/
 ```
 
 ### 3. Train a Model
-Use an existing config name (e.g. `hvac-mlp-cls`, `TCN-reg`, `transformer-reg`, etc.). The train script resolves short names, dotted paths, or file paths.
+Use an existing config name (e.g. `MLP-cls`, `TCN-reg`, `transformer-reg`, etc.). The train script resolves short names, dotted paths, or file paths.
 
-For running the config named "TCN-reg", residing at `nnlibrary/configs/TCN-reg.py`:
+For running the config named "TCN-reg", placed at [`nnlibrary/configs/TCN-reg.py`](./nnlibrary/configs/TCN-reg.py):
 ```bash
 python scripts/train.py -n TCN-reg # Shorthand
 python scripts/train.py -n nnlibrary.configs.TCN-reg # Using module path
@@ -120,7 +120,7 @@ exp/<dataset>/<model_name>/<run_name>/
 	wandb/
 ```
 
-### 3.1. Hyperparameter Sweeps (Optional)
+### 3.1. Hyperparameter Sweeps
 The framework supports WandB-powered hyperparameter sweeps. To use sweeps:
 
 1. **Define a sweep configuration in your config file:**
@@ -156,7 +156,7 @@ python scripts/sweep.py -n transformer-reg --logging --log-level DEBUG
 
 
 
-### 4. Evaluate & Visualize
+### 4. Evaluate & Visualize (WIP)
 Visualize predictions from a trained model checkpoint:
 ```bash
 python scripts/eval_visualization.py -n <config_name> -r <run_name> [--split train|val|test] [--interactive]
@@ -192,11 +192,11 @@ It is recommended to set the `--dynamic-batch` flag, since in deployment, the ba
 ## Extending
 | Task | Where |
 |------|-------|
-| New model | Implement in `nnlibrary/models/`, import new model in `/nnlibrary/model/__init__.py`, then reference in your config |
-| Custom hook | Subclass `Hookbase` in `nnlibrary/engines/hooks.py`, add to config `hooks` list |
-| New loss or scheduler | Add to `nnlibrary/utils/loss.py` or `nnlibrary/utils/schedulers.py` |
-| New transform | Add to `nnlibrary/utils/transforms.py` (e.g. target normalization/standardization) |
-| New dataset | Implement in `nnlibrary/datasets/`, import in `nnlibrary/datasets/__init__.py`, then reference in config |
+| New model | Implement in `nnlibrary/models/`, import new model in [`/nnlibrary/model/__init__.py`](./nnlibrary/models/__init__.py), then reference in your config |
+| Custom hook | Subclass `Hookbase` in [`nnlibrary/engines/hooks.py`](./nnlibrary/engines/hooks.py), add to config `hooks` list |
+| New loss or scheduler | Add to [`nnlibrary/utils/loss.py`](./nnlibrary/utils/loss.py) or [`nnlibrary/utils/schedulers.py`](./nnlibrary/utils/schedulers.py) |
+| New transform | Add to [`nnlibrary/utils/transforms.py`](./nnlibrary/utils/transforms.py) (e.g. target normalization/standardization) |
+| New dataset | Implement in `nnlibrary/datasets/`, import in [`nnlibrary/datasets/__init__.py`](./nnlibrary/datasets/__init__.py), then reference in config |
 
 
 ## Minimal In‑Code Example
@@ -207,11 +207,3 @@ import nnlibrary.configs.HVACModeMLP as cfg
 trainer = Trainer(cfg=cfg)
 trainer.train()      # trains, validates (if enabled), checkpoints
 ```
-
----
-## Design Idea
-* Single source of truth: configs hold knobs; trainer/hook code stays lean.
-* Pluggable lifecycle: hooks avoid subclass explosion on the trainer.
-* Evaluation symmetry: same evaluators for validation & test; consistent metric dict.
-* Traceability: run artifacts self-contained under `exp/`.
-* Modularization allows for easier debugging.
