@@ -5,16 +5,15 @@ High‑level framework for training and evaluating neural network surrogates of 
 For background on the underlying control problem see the MPC documentation: https://mpc-cv.docs.cern.ch/
 
 ---
-## Framework overview
+## Overview
 
-1. Configuration‑First Design
+1. Configuration Design
 	 - Each experiment is defined by a config module in `nnlibrary/configs/` (model, data paths, dataloader params, optimizer/scheduler, hooks, metrics).
-	 - Usually each config imports a default base config ([`nnlibrary/configs/__default__.py`](./nnlibrary/configs/__default__.py)) which contains some of the lesser important config settings.
-	 - This approach is done because all configs must contain all the different arguments, but it is not always necessary to modify all settings per config basis.
+	 - Usually each config imports a default base config ([`nnlibrary/configs/__default__.py`](./nnlibrary/configs/__default__.py)) which contains some of the general config settings.
 
 2. Datasets & I/O
 	 - Dataset configuration (paths, batch sizes, shuffle flags, optional transforms) is declared in the experiment config modules under `nnlibrary/configs/` (see the `dataset` and its `train/val/test` `DataLoaderConfig` entries).
-	 - Concrete dataset classes are placed in `nnlibrary/datasets/` (e.g. `MpcDatasetHDF5` from [`nnlibrary/datasets/mpc_ahu.py`](./nnlibrary/datasets/mpc_ahu.py)). Each dataset should at the least implements `__len__` and `__getitem__` to return `(inputs, targets)`.
+	 - Concrete dataset classes are placed in `nnlibrary/datasets/` (e.g. `MpcDatasetHDF5` from [`nnlibrary/datasets/mpc_ahu.py`](./nnlibrary/datasets/mpc_ahu.py)). Each dataset should at the least implement `__len__` and the `__getitem__` for returning `(inputs, targets)`.
 	 - To use a different dataset, add a new Dataset class in `nnlibrary/datasets/`, import it in [`nnlibrary/datasets/__init__.py`](./nnlibrary/datasets/__init__.py), and then you can reference it by name in the config’s dataset section.
 
 3. Models
@@ -23,21 +22,21 @@ For background on the underlying control problem see the MPC documentation: http
 	 - New models can also be defined, but must be imported in [`nnlibrary/models/__init__.py`](./nnlibrary/__init__.py) to be used.
 
 4. Training Engine
-	 - Central `Trainer` (in [`nnlibrary/engines/train.py`](./nnlibrary/engines/train.py)) orchestrates: dataloaders, model, optimizer / scheduler, AMP autocast (with `GradScaler` for float16), gradient clipping, hooks.
-	 - Usually direct usage of `Trainer` is not recommended, instead use the training script under [`scripts/train.py`](./scripts/train.py).
+	 - Central `Trainer` (in [`nnlibrary/engines/train.py`](./nnlibrary/engines/train.py)) orchestrates: dataloaders, model, optimizer / scheduler, AMP, gradient clipping, hooks.
+	 - Usually direct usage of `Trainer` is not needed, instead use the training script under [`scripts/train.py`](./scripts/train.py).
 	 - Metrics & state exposed through a shared `info` dict so hooks remain decoupled.
 
-5. Hooks (Lifecycle Extensions)
+5. Hooks
 	 - A 'Hook' frame is present for interacting with multiple different stages of the training process, these can be seen under [`nnlibrary/engines/hooks.py`](./nnlibrary/engines/hooks.py).
      - The base hooks implement validation / test evaluation, checkpointing, timing instrumentation, logging to Weights & Biases (W&B) and TensorBoard, post‑test plotting.
 	 - Easy to add custom logic (inherit `Hookbase` and register in config list).
-    	 - If you want to keep the default hooks in your custom config add the following to your config:
+    	 - If you want to keep the default hooks but also add new custom hooks in a config, add the following to your config:
             ```python
             hooks.append(CustomHookName)
             ```
 
 6. Evaluation Abstractions
-	 - `ClassificationEvaluator` and `RegressionEvaluator` return consistent metric dicts (plus optional detailed artifacts like confusion matrix or prediction scatter/sequence plots).
+	 - `ClassificationEvaluator` and `RegressionEvaluator` return metric dicts (plus optional detailed artifacts like confusion matrix or prediction scatter/sequence plots).
 
 7. Observability & Reproducibility
 	 - W&B run grouping by dataset/model; TensorBoard summaries under `exp/<dataset>/<model>/tensorboard`.
@@ -84,7 +83,7 @@ mkdir .secrets
 echo '<wandb-api-key>' > .secrets/wandb
 ```
 
-### 2. Data Layout Expectation (This might change at some point)
+### 2. Data Layout
 ```
 data/
 	<dataset_range>/
