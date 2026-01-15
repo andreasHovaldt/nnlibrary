@@ -1,8 +1,8 @@
-# MPC AHU Neural Network
+# NNLIBRARY
 
-High‑level framework for training and evaluating neural network surrogates of an existing Model Predictive Control (MPC) strategy governing HVAC Air Handling Units (AHUs) (e.g. `HVAC_SR1_PLC1`, `HVAC_SR1_PLC2`). The goal is to approximate the MPC policy / setpoint generation (classification or regression targets) with fast, deployable PyTorch models (MLP, TCN, etc.) while keeping the experimentation loop reproducible, observable and extensible.
+High‑level framework for training and evaluating neural network architectures. The goal is to make training both classification and regression networks fast, easy, and consistent, while keeping the experimentation loop reproducible, observable and extensible.
 
-For background on the underlying control problem see the MPC documentation: https://mpc-cv.docs.cern.ch/
+Credit to [Pointcept](https://github.com/Pointcept/Pointcept), which this approach was inspired by.
 
 ---
 ## Overview
